@@ -1,0 +1,19 @@
+[Unit]
+Description=Sonary - my local sound library
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+
+WorkingDirectory=/usr/local/share/sonary
+
+StandardOutput=journal
+StandardError=journal
+
+ExecStart=/usr/local/share/sonary/sonary
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

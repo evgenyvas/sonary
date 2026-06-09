@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sonary</title>
+    <link rel="icon" type="image/x-icon" href="/static/img/favicon.ico">
+  </head>
+  <body>
+    <sonary-app></sonary-app>
+    <script>
+    (async () => {
+      if (!globalThis.URLPattern) {
+        await import('/static/build/url-pattern-polyfill.js');
+      }
+      await import('/static/build/sonary.js');
+    })().catch((error) => {
+      console.error(error);
+      throw new Error('Error while including package');
+    });
+    </script>
+  </body>
+</html>
