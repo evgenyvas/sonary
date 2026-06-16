@@ -2,52 +2,87 @@
 package lib
 
 import (
+	"sync/atomic"
 	"time"
+)
+
+const (
+	TaskIndexTrackScan = "index_track_scan"
 )
 
 type TrackOrDirectory interface {
 	Type() string
 }
 
-type Track struct {
-	Path        string
-	FullContent string
-	Content     []byte
-	Metadata    MetadataTrack
-}
-
-func (m Track) Type() string {
-	return "note"
-}
-
-type DirectoryTrack struct {
-	Path string
+type Artist struct {
+	ID   int
 	Name string
 }
 
-func (m DirectoryTrack) Type() string {
-	return "directory"
+type Album struct {
+	ID       int
+	ArtistID int
+	Title    string
+	Year     int
 }
 
-type MetadataTrack struct {
-	Format string
-	Date   time.Time
-	Title  string
+type Track struct {
+	ID          int
+	AlbumID     int
+	Path        string
+	FileType    string
+	Title       string
+	Artist      string
+	AlbumArtist string
+	Year        int
+	Genre       string
+	Album       string
+	TrackNumber int
+	Duration    time.Duration
+	Lyrics      string
+	IsCue       bool
+	CueFile     string
+	CueOffset   time.Duration
+	IsLike      bool
 }
 
-func ParseMetadata(input string) (meta MetadataTrack, rest []byte) {
-	meta = MetadataTrack{
-		Format: "",
-		Title:  "",
-		Date:   time.Now(),
-	}
+func (m Artist) Type() string {
+	return "artist"
+}
 
-	//t, err := time.Parse("2006-01-02 15:04:05", "")
-	//if err != nil {
-	//log.Println("Error parsing date:", err)
-	//} else {
-	//meta.Date = t
-	//}
+func (m Album) Type() string {
+	return "album"
+}
 
-	return meta, rest
+func (m Track) Type() string {
+	return "track"
+}
+
+type Progress struct {
+	Total     int
+	Processed atomic.Int64
+}
+
+type DirDB struct {
+	ID       int
+	Path     string
+	Mtime    int64
+	LastScan int64
+}
+
+type ArtistDB struct {
+	ID   int
+	Name string
+}
+
+type AlbumDB struct {
+	ID       int
+	ArtistID int
+	Title    string
+	Year     int
+}
+
+type DirScan struct {
+	Mtime    int64
+	LastScan int64
 }

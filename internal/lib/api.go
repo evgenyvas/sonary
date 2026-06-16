@@ -1,7 +1,7 @@
 package lib
 
 import (
-	"os"
+//"os"
 )
 
 type APIStatus struct {
@@ -51,20 +51,29 @@ type APITrackPost struct {
 	Content string `json:"content"`
 }
 
+type APIScan struct {
+	ID        int    `json:"id"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+	Status    string `json:"status"`
+	Message   string `json:"message"`
+	Result    string `json:"result"`
+}
+
+type APIPathPost struct {
+	Path string `json:"path"`
+}
+
 func ToAPI(n TrackOrDirectory) APITrackOrDirectory {
 	switch n := n.(type) {
 	case Track:
 		return APITrack{
-			Format: n.Metadata.Format,
-			Date:   n.Metadata.Date.Format("2006-01-02 15:04:05"),
-			Title:  n.Metadata.Title,
-			Path:   n.Path,
-			Type:   n.Type(),
+			Path: n.Path,
+			Type: n.Type(),
 		}
-	case DirectoryTrack:
+	case Album:
 		return APIDirectory{
-			Path: n.Path + string(os.PathSeparator),
-			Name: n.Name,
+			Name: n.Title,
 			Type: n.Type(),
 		}
 	default:
