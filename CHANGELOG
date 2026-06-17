@@ -1,2 +1,6 @@
 v.0.0.1
   - first release
+
+v.0.0.2
+  - sync music directories
+  - scan music tags and write it into database

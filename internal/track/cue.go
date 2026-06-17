@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"os"
 	"path/filepath"
@@ -305,24 +306,30 @@ func DecodeCue(data []byte) string {
 }
 
 func scanCue(ff *ffmpeg.FFmpeg, root string, path string, cueFile string) ([]*lib.Track, error) {
+	log.Printf("Scanning CUE... '%s'\n", cueFile)
 	fullPath := filepath.Join(root, path)
 	cueData, err := os.ReadFile(filepath.Join(fullPath, cueFile))
 	if err != nil {
+		log.Printf("Reading CUE error: %v", err)
 		return nil, err
 	}
 
 	cue, err := ParseCue(strings.NewReader(DecodeCue(cueData)))
 	if err != nil {
+		log.Printf("Reading CUE error: %v", err)
 		return nil, err
 	}
+	log.Printf("CUE parsed OK '%s'\n", cueFile)
 
 	// get lyrics if exists
 	lyrics, _ := GetLyrics(fullPath)
 
 	for fi := range cue.Files {
 		file := &cue.Files[fi]
-		duration, err := ff.Duration(filepath.Join(fullPath, file.Name))
+		duration, err := ff.Duration(filepath.Join(
+			fullPath, strings.ReplaceAll(file.Name, "\\", string(os.PathSeparator))))
 		if err != nil {
+			log.Printf("Load duration error: %v", err)
 			return nil, err
 		}
 		file.TotalFrames = DurationToFrames(duration)
@@ -330,6 +337,10 @@ func scanCue(ff *ffmpeg.FFmpeg, root string, path string, cueFile string) ([]*li
 
 	CalculateDurations(cue)
 
+	album := cue.Title
+	if album == "" {
+		album = "Unknown Album"
+	}
 	tracks := []*lib.Track{}
 	for fi := range cue.Files {
 		file := &cue.Files[fi]
@@ -343,7 +354,7 @@ func scanCue(ff *ffmpeg.FFmpeg, root string, path string, cueFile string) ([]*li
 				AlbumArtist: cue.Performer,
 				Year:        cue.Year(),
 				Genre:       cue.Genre(),
-				Album:       cue.Title,
+				Album:       album,
 				TrackNumber: track.Number,
 				Duration:    FramesToDuration(track.LengthFrame),
 				Lyrics:      GetLyricsForTrack(lyrics, track.Title),
@@ -354,5 +365,6 @@ func scanCue(ff *ffmpeg.FFmpeg, root string, path string, cueFile string) ([]*li
 		}
 	}
 
+	log.Printf("CUE processed OK '%s'\n", cueFile)
 	return tracks, nil
 }

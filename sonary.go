@@ -15,7 +15,6 @@ import (
 	"sonary/internal/database"
 	"sonary/internal/job"
 	"sonary/internal/lib"
-	"sonary/internal/track"
 	"sonary/utils"
 	"syscall"
 	"time"
@@ -83,7 +82,7 @@ func (api *API) ScanStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	job, err := job.Get(api.db, job.JobFilter{
-		TaskType: utils.Ptr(lib.TaskIndexTrackScan),
+		TaskType: utils.Ptr(job.TaskScanDirectoryTracks),
 		Payload:  utils.Ptr(string(payloadBytes)),
 		Status:   utils.Ptr([]string{job.StatusPending, job.StatusRunning, job.StatusFailed}),
 	})
@@ -119,7 +118,7 @@ func (api *API) ScanStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jobId, err := job.Enqueue(api.db, lib.TaskIndexTrackScan, input)
+	jobId, err := job.Enqueue(api.db, job.TaskScanDirectoryTracks, input)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -153,7 +152,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func mains() {
+func main() {
 	cfg := config.GetConfig()
 
 	db := database.GetDB()
@@ -164,9 +163,16 @@ func mains() {
 	defer cancelWorkers()
 
 	// Start the worker pool
-	workerCount := 1
+	workerCount := cfg.WorkerCount
 	log.Printf("Starting worker pool with %d concurrent workers...", workerCount)
 	job.StartWorkerPool(workerCtx, db, workerCount)
+
+	log.Println("Starting sync directories ...")
+	_, err := job.Enqueue(db, job.TaskSyncDirectories, nil)
+	if err != nil {
+		log.Printf("Error: %v", err)
+		os.Exit(1)
+	}
 
 	api := &API{
 		db: db,
@@ -233,15 +239,4 @@ func mains() {
 	time.Sleep(1 * time.Second) // Small buffer to let everything settle
 
 	log.Println("Application stopped cleanly.")
-}
-
-func main() {
-	cfg := config.GetConfig()
-
-	db := database.GetDB()
-	defer db.Close()
-
-	fmt.Println(cfg.RootPath)
-
-	track.ScanLibrary(db, cfg.RootPath)
 }

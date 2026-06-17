@@ -8,7 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"sonary/internal/lib"
+	"sonary/internal/track"
+	"sonary/utils"
 	"strings"
 	"time"
 )
@@ -18,6 +19,11 @@ const (
 	StatusRunning   = "running"
 	StatusCompleted = "completed"
 	StatusFailed    = "failed"
+)
+
+const (
+	TaskSyncDirectories     = "sync_directories"
+	TaskScanDirectoryTracks = "scan_directory_tracks"
 )
 
 type Job struct {
@@ -36,6 +42,10 @@ type JobFilter struct {
 	TaskType *string
 	Payload  *string
 	Status   *[]string
+}
+
+type JobPath struct {
+	Path string `json:"path"`
 }
 
 // Enqueue inserts a new background task
@@ -219,10 +229,16 @@ func StartWorkerPool(ctx context.Context, db *sql.DB, workerCount int) {
 
 					log.Printf("[Worker %d] Picked up job %d (%s)", workerID, job.ID, job.TaskType)
 
-					result, err := processTask(job)
+					result, err := processTask(db, job)
 					if err != nil {
-						log.Printf("[Worker %d] Job %d Failed: %v", workerID, job.ID, err)
-						_ = UpdateStatus(db, job.ID, StatusFailed, nil, err.Error())
+						if errors.Is(err, ErrTaskWait) {
+							log.Printf("[Worker %d] Job %d is waiting for other task: %v", workerID, job.ID, err)
+							time.Sleep(3 * time.Second) // wait some time
+							_ = UpdateStatus(db, job.ID, StatusPending, nil, "")
+						} else {
+							log.Printf("[Worker %d] Job %d Failed: %v", workerID, job.ID, err)
+							_ = UpdateStatus(db, job.ID, StatusFailed, nil, err.Error())
+						}
 					} else {
 						log.Printf("[Worker %d] Job %d Completed", workerID, job.ID)
 						_ = UpdateStatus(db, job.ID, StatusCompleted, result, "")
@@ -233,11 +249,70 @@ func StartWorkerPool(ctx context.Context, db *sql.DB, workerCount int) {
 	}
 }
 
-func processTask(job *Job) (any, error) {
-	time.Sleep(100 * time.Second)
+var ErrTaskWait = errors.New("job wait for other task")
 
-	if job.TaskType == lib.TaskIndexTrackScan {
-		return map[string]any{"rows_processed": 42}, nil
+func processTask(db *sql.DB, job *Job) (any, error) {
+	if job.TaskType == TaskSyncDirectories {
+		res, err := track.SyncDirectories()
+		if err != nil {
+			log.Printf("Sync directories error: %v", err)
+			return nil, err
+		}
+
+		ct := track.GetImportContext(res["num"].(int))
+
+		dirs, err := track.GetDirectories(db)
+		if err != nil {
+			log.Printf("Load directories error: %v", err)
+			return nil, err
+		}
+
+		for _, dir := range dirs {
+			if dir.LastScan != 0 {
+				continue
+			}
+
+			// create scan job for each directory
+			_, err := Enqueue(db, TaskScanDirectoryTracks, JobPath{Path: dir.Path})
+			if err != nil {
+				log.Printf("Add job error: %v", err)
+				return nil, err
+			}
+			ct.Progress.Processed.Add(1)
+		}
+
+		return res, nil
+	} else if job.TaskType == TaskScanDirectoryTracks {
+		// directory scanning job must be completed
+		jobDirScan, err := Get(db, JobFilter{
+			TaskType: utils.Ptr(TaskSyncDirectories),
+			Status:   utils.Ptr([]string{StatusPending, StatusRunning}),
+		})
+		if err != nil {
+			log.Printf("Get job error: %v", err)
+			return nil, err
+		}
+		if jobDirScan != nil {
+			return nil, ErrTaskWait
+		}
+
+		ct := track.GetImportContext(0)
+
+		var dirScanPayload JobPath
+		err = json.Unmarshal(job.Payload, &dirScanPayload)
+		if err != nil {
+			log.Printf("JSON unmarshal error: %v", err)
+			return nil, err
+		}
+
+		err = track.ScanTracksInDir(dirScanPayload.Path)
+		if err != nil {
+			log.Printf("Scan directory tracks error: %v", err)
+			return nil, err
+		}
+		ct.Progress.Processed.Add(1)
+
+		return nil, nil
 	}
 	return nil, fmt.Errorf("unsupported task context")
 }

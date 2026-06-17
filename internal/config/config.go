@@ -14,6 +14,7 @@ type Config struct {
 	AppEnv      string `env:"APP_ENV"`
 	RootPath    string `env:"ROOT_PATH"`
 	DatabaseDsn string `env:"DATABASE_DSN"`
+	WorkerCount int    `env:"WORKER_COUNT"`
 }
 
 var instance *Config

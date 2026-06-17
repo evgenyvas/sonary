@@ -4,6 +4,7 @@ package track
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -68,13 +69,16 @@ func ParseLyrics(content string) ([]TrackLyrics, error) {
 }
 
 func GetLyrics(dirPath string) (map[string]TrackLyrics, error) {
+	log.Println("Loading lyrics...")
 	data, _ := os.ReadFile(filepath.Join(dirPath, "lyrics.txt"))
 	if len(data) == 0 { // it's OK if no lyrics
+		log.Printf("Lyrics not found %v", dirPath)
 		return nil, nil
 	}
 
 	tracks, err := ParseLyrics(string(data))
 	if err != nil {
+		log.Printf("Error parsing lyrics %v", dirPath)
 		return nil, err
 	}
 
@@ -83,6 +87,7 @@ func GetLyrics(dirPath string) (map[string]TrackLyrics, error) {
 		lyricsByTrack[track.Title] = track
 	}
 
+	log.Println("Lyrics loaded OK $v", dirPath)
 	return lyricsByTrack, nil
 }
 

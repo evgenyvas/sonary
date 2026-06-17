@@ -115,39 +115,11 @@ func GetDB() *sql.DB {
 			log.Printf("Table '%s' already exists. Skipping initialization.\n", tableName)
 		}
 
-		// SQLite performs best with background workers when connections are pooled cleanly
-		//db.SetMaxOpenConns(10)
-		//db.SetMaxIdleConns(5)
-		//db.SetConnMaxLifetime(time.Hour)
+		db.SetMaxOpenConns(1)
+		db.SetMaxIdleConns(1)
+		db.SetConnMaxLifetime(0)
 
 		instance = db
 	})
 	return instance
-}
-
-func InsertScanState() {
-	//INSERT OR REPLACE INTO scan_state (...)
-}
-
-func InsertArtist() {
-	//tx, err := db.Begin()
-	//stmtArtist, _ := tx.Prepare(`
-	//INSERT OR IGNORE INTO artists(name)
-	//VALUES(?)
-	//`)
-	//SELECT id
-	//FROM artists
-	//WHERE name='Pink Floyd';
-	//tx.Commit()
-
-	//DELETE FROM albums
-	//WHERE NOT EXISTS (
-	//SELECT 1
-	//FROM tracks
-	//WHERE tracks.album_id = albums.id
-	//);
-
-	//UPDATE directories
-	//SET last_seen = scanID
-	//WHERE path = ?
 }

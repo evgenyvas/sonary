@@ -2,6 +2,7 @@
 package ffmpeg
 
 import (
+	"log"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -31,6 +32,8 @@ func NewFFmpeg() *FFmpeg {
 }
 
 func (f *FFmpeg) Duration(path string) (time.Duration, error) {
+	log.Printf("Getting track duration via ffmpeg...'%s'\n", path)
+
 	cmd := exec.Command(
 		f.FFprobePath,
 		"-v", "error",
@@ -41,6 +44,7 @@ func (f *FFmpeg) Duration(path string) (time.Duration, error) {
 
 	out, err := cmd.Output()
 	if err != nil {
+		log.Printf("FFmpeg error: %v", err)
 		return 0, err
 	}
 
@@ -49,9 +53,11 @@ func (f *FFmpeg) Duration(path string) (time.Duration, error) {
 		64,
 	)
 	if err != nil {
+		log.Printf("ParseFloat error: %v", err)
 		return 0, err
 	}
 
+	log.Printf("Track duration determined OK. '%s'\n", path)
 	return time.Duration(seconds * float64(time.Second)), nil
 }
 

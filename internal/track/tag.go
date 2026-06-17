@@ -1,10 +1,12 @@
 package track
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"sonary/internal/ffmpeg"
 	"sonary/internal/lib"
+	"strings"
 
 	"github.com/dhowden/tag"
 )
@@ -17,14 +19,31 @@ func scanAudioFile(ff *ffmpeg.FFmpeg, root string, path string, fileName string)
 	}
 	defer f.Close()
 
-	meta, err := tag.ReadFrom(f)
+	duration, err := ff.Duration(fullPath)
 	if err != nil {
 		return nil, err
 	}
 
-	duration, err := ff.Duration(fullPath)
+	meta, err := tag.ReadFrom(f)
 	if err != nil {
-		return nil, err
+		if errors.Is(err, tag.ErrNoTagsFound) {
+			// tags not found
+			ext := strings.ToLower(filepath.Ext(fileName))
+			return &lib.Track{
+				Path:     filepath.Join(path, fileName),
+				FileType: strings.ToUpper(strings.ReplaceAll(ext, ".", "")),
+				Title:    strings.TrimSuffix(fileName, ext),
+				Album:    "Unknown Album",
+				Duration: duration,
+			}, nil
+		} else {
+			return nil, err
+		}
+	}
+
+	album := meta.Album()
+	if album == "" {
+		album = "Unknown Album"
 	}
 
 	trackNumber, _ := meta.Track()
@@ -33,7 +52,7 @@ func scanAudioFile(ff *ffmpeg.FFmpeg, root string, path string, fileName string)
 		FileType:    string(meta.FileType()),
 		Title:       meta.Title(),
 		Artist:      meta.Artist(),
-		Album:       meta.Album(),
+		Album:       album,
 		AlbumArtist: meta.AlbumArtist(),
 		Year:        meta.Year(),
 		Genre:       meta.Genre(),

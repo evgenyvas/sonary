@@ -2,12 +2,7 @@
 package lib
 
 import (
-	"sync/atomic"
 	"time"
-)
-
-const (
-	TaskIndexTrackScan = "index_track_scan"
 )
 
 type TrackOrDirectory interface {
@@ -56,11 +51,6 @@ func (m Album) Type() string {
 
 func (m Track) Type() string {
 	return "track"
-}
-
-type Progress struct {
-	Total     int
-	Processed atomic.Int64
 }
 
 type DirDB struct {
