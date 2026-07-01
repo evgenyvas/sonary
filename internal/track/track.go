@@ -82,7 +82,7 @@ func GetOrAddAlbum(db database.DBTX, artistID int, track *lib.Track) (int, error
 }
 
 func SyncDirectories() (map[string]any, error) {
-	db := database.GetDB()
+	writeDB := database.Writer()
 	cfg := config.GetConfig()
 	root := cfg.RootPath
 
@@ -139,7 +139,7 @@ func SyncDirectories() (map[string]any, error) {
 		return nil
 	})
 
-	dirExists, err := database.GetDirectories(db)
+	dirExists, err := database.GetDirectories(writeDB)
 	if err != nil {
 		log.Printf("Loading directories error: %v", err)
 		return nil, err
@@ -162,7 +162,7 @@ func SyncDirectories() (map[string]any, error) {
 	// new dirs
 	if len(musicDirs) > 0 {
 		log.Printf("to add: %d\n", len(musicDirs))
-		if err := database.SaveDirectories(db, musicDirs); err != nil {
+		if err := database.SaveDirectories(writeDB, musicDirs); err != nil {
 			return nil, err
 		}
 	}
@@ -170,7 +170,7 @@ func SyncDirectories() (map[string]any, error) {
 	// modified dirs - update mtime
 	if len(dirsUpdate) > 0 {
 		log.Printf("to update: %d\n", len(dirsUpdate))
-		if err := database.UpdateDirectoriesMtime(db, dirsUpdate); err != nil {
+		if err := database.UpdateDirectoriesMtime(writeDB, dirsUpdate); err != nil {
 			return nil, err
 		}
 	}
@@ -178,7 +178,7 @@ func SyncDirectories() (map[string]any, error) {
 	// dirs to delete
 	if len(dirExists) > 0 {
 		log.Printf("to delete: %d\n", len(dirExists))
-		if err := database.DeleteDirectories(db, dirExists); err != nil {
+		if err := database.DeleteDirectories(writeDB, dirExists); err != nil {
 			return nil, err
 		}
 	}
@@ -200,12 +200,12 @@ func FormatTrackDuration(duration time.Duration) string {
 }
 
 func ScanTracksInDir(path string) error {
-	db := database.GetDB()
+	writeDB := database.Writer()
 	cfg := config.GetConfig()
 	ff := ffmpeg.NewFFmpeg()
 	root := cfg.RootPath
 
-	dir, err := database.GetDirectory(db, path)
+	dir, err := database.GetDirectory(writeDB, path)
 	if err != nil {
 		log.Printf("Get directory data error: %v", path)
 		return err
@@ -250,7 +250,7 @@ func ScanTracksInDir(path string) error {
 
 		skipFiles[entry.Name()] = struct{}{}
 
-		tx, er := db.Begin()
+		tx, er := writeDB.Begin()
 		if er != nil {
 			return er
 		}
@@ -309,7 +309,7 @@ func ScanTracksInDir(path string) error {
 		}
 		log.Printf("Directory CUE processed OK '%s/%s'\n", dir.Path, entry.Name())
 	}
-	tx, err := db.Begin()
+	tx, err := writeDB.Begin()
 	if err != nil {
 		return err
 	}

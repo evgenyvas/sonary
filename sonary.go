@@ -22,7 +22,8 @@ import (
 )
 
 type API struct {
-	db *sql.DB
+	readDB  *sql.DB
+	writeDB *sql.DB
 	//Store lib.Store
 	//Logger     Logger
 	//Config     Config
@@ -68,7 +69,7 @@ func (api *API) GetTracks(w http.ResponseWriter, r *http.Request) {
 		params.ArtistID = utils.Ptr(artistID)
 	}
 
-	tracks, hasNext, err := database.GetTracks(api.db, params)
+	tracks, hasNext, err := database.GetTracks(api.readDB, params)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -104,7 +105,7 @@ func (api *API) GetTrack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	track, err := database.GetTrack(api.db, id)
+	track, err := database.GetTrack(api.readDB, id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -138,7 +139,7 @@ func (api *API) UpdateTrack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = database.UpdateTrack(api.db, id, lib.TrackUpdateParams{
+	err = database.UpdateTrack(api.writeDB, id, lib.TrackUpdateParams{
 		Like: utils.Ptr(t.Like),
 	})
 	if err != nil {
@@ -146,7 +147,7 @@ func (api *API) UpdateTrack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	track, err := database.GetTrack(api.db, id)
+	track, err := database.GetTrack(api.readDB, id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -183,7 +184,7 @@ func (api *API) GetArtists(w http.ResponseWriter, r *http.Request) {
 		params.Page = utils.Ptr(page)
 	}
 
-	artists, hasNext, err := database.GetArtists(api.db, params)
+	artists, hasNext, err := database.GetArtists(api.readDB, params)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -219,7 +220,7 @@ func (api *API) GetArtist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	artist, err := database.GetArtist(api.db, lib.ArtistsGetParams{ID: utils.Ptr(id)})
+	artist, err := database.GetArtist(api.readDB, lib.ArtistsGetParams{ID: utils.Ptr(id)})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -271,7 +272,7 @@ func (api *API) GetAlbums(w http.ResponseWriter, r *http.Request) {
 		params.ArtistID = utils.Ptr(artistID)
 	}
 
-	albums, hasNext, err := database.GetAlbums(api.db, params)
+	albums, hasNext, err := database.GetAlbums(api.readDB, params)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -307,13 +308,13 @@ func (api *API) GetAlbum(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	album, err := database.GetAlbum(api.db, lib.AlbumsGetParams{ID: utils.Ptr(id)})
+	album, err := database.GetAlbum(api.readDB, lib.AlbumsGetParams{ID: utils.Ptr(id)})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	tracks, _, err := database.GetTracks(api.db, lib.TracksGetParams{
+	tracks, _, err := database.GetTracks(api.readDB, lib.TracksGetParams{
 		AlbumID: utils.Ptr(album.ID),
 	})
 	if err != nil {
@@ -355,8 +356,11 @@ func corsMiddleware(next http.Handler) http.Handler {
 func main() {
 	cfg := config.GetConfig()
 
-	db := database.GetDB()
-	defer db.Close()
+	readDB := database.Reader()
+	defer readDB.Close()
+
+	writeDB := database.Writer()
+	defer writeDB.Close()
 
 	// Create a background context that listens for system shutdown signals (Ctrl+C)
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())
@@ -365,17 +369,23 @@ func main() {
 	// Start the worker pool
 	workerCount := cfg.WorkerCount
 	log.Printf("Starting worker pool with %d concurrent workers...", workerCount)
-	job.StartWorkerPool(workerCtx, db, workerCount)
+	job.StartWorkerPool(workerCtx, writeDB, workerCount)
+
+	if err := job.CancelJobs(writeDB); err != nil {
+		log.Printf("Error: %v", err)
+		os.Exit(1)
+	}
 
 	log.Println("Starting sync directories ...")
-	_, err := job.Enqueue(db, job.TaskSyncDirectories, nil)
+	_, err := job.Enqueue(writeDB, job.TaskSyncDirectories, nil)
 	if err != nil {
 		log.Printf("Error: %v", err)
 		os.Exit(1)
 	}
 
 	api := &API{
-		db: db,
+		readDB:  readDB,
+		writeDB: writeDB,
 	}
 
 	mux := http.NewServeMux()

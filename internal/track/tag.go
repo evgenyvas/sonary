@@ -24,15 +24,17 @@ func scanAudioFile(ff *ffmpeg.FFmpeg, root string, path string, fileName string)
 		return nil, err
 	}
 
+	ext := strings.ToLower(filepath.Ext(fileName))
+	fileTitle := strings.TrimSuffix(fileName, ext)
+
 	meta, err := tag.ReadFrom(f)
 	if err != nil {
 		if errors.Is(err, tag.ErrNoTagsFound) {
 			// tags not found
-			ext := strings.ToLower(filepath.Ext(fileName))
 			return &lib.Track{
 				Path:     filepath.Join(path, fileName),
 				FileType: strings.ToUpper(strings.ReplaceAll(ext, ".", "")),
-				Title:    strings.TrimSuffix(fileName, ext),
+				Title:    fileTitle,
 				Album:    "Unknown Album",
 				Duration: duration,
 			}, nil
@@ -47,10 +49,14 @@ func scanAudioFile(ff *ffmpeg.FFmpeg, root string, path string, fileName string)
 	}
 
 	trackNumber, _ := meta.Track()
+	trackTitle := meta.Title()
+	if trackTitle == "" {
+		trackTitle = fileTitle
+	}
 	track := &lib.Track{
 		Path:        filepath.Join(path, fileName),
 		FileType:    string(meta.FileType()),
-		Title:       meta.Title(),
+		Title:       trackTitle,
 		Artist:      meta.Artist(),
 		Album:       album,
 		AlbumArtist: meta.AlbumArtist(),

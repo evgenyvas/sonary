@@ -209,6 +209,17 @@ func UpdateStatus(db *sql.DB, id int, status string, result any, errMsg string) 
 	return err
 }
 
+var ErrJobCancelled = errors.New("job was cancelled unexpectedly")
+
+// CancelJobs sets all running or pending jobs to error
+func CancelJobs(db *sql.DB) error {
+	log.Println("Cancelling old jobs ...")
+	query := `UPDATE jobs SET status = ?, error_message = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE status = ? OR status = ?`
+	_, err := db.Exec(query, StatusFailed, ErrJobCancelled.Error(), StatusPending, StatusRunning)
+	return err
+}
+
 func StartWorkerPool(ctx context.Context, db *sql.DB, workerCount int) {
 	for i := 1; i <= workerCount; i++ {
 		go func(workerID int) {
@@ -263,9 +274,7 @@ func processTask(db *sql.DB, job *Job) (any, error) {
 			log.Printf("[Job %v] Sync directories error: %v", job.ID, err)
 			return nil, err
 		}
-
-		ct := lib.GetImportContext(true)
-		ct.Progress.Total = res["num"].(int)
+		log.Printf("[Job %v] Sync directories result: %v", res)
 
 		dirs, err := database.GetDirectories(db)
 		if err != nil {
@@ -273,6 +282,7 @@ func processTask(db *sql.DB, job *Job) (any, error) {
 			return nil, err
 		}
 
+		total := 0
 		for _, dir := range dirs {
 			if dir.LastScan != 0 {
 				continue
@@ -284,7 +294,11 @@ func processTask(db *sql.DB, job *Job) (any, error) {
 				log.Printf("[Job %v] Add job error: %v", job.ID, err)
 				return nil, err
 			}
+			total++
 		}
+
+		ct := lib.GetImportContext(true)
+		ct.Progress.Total = total
 
 		return res, nil
 	} else if job.TaskType == TaskScanDirectoryTracks {

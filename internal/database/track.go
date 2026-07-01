@@ -176,7 +176,48 @@ func DeleteDirectories(db *sql.DB, dirs map[string]lib.DirDB) error {
 			placeholders = append(placeholders, "?")
 		}
 
+		// delete tracks
 		query := fmt.Sprintf(
+			"DELETE FROM tracks WHERE directory_id IN (%s)",
+			strings.Join(placeholders, ","),
+		)
+
+		_, err = tx.Exec(query, ids...)
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+
+		// delete albums
+		_, err = tx.Exec(`DELETE FROM albums
+			WHERE NOT EXISTS (
+			SELECT 1
+			FROM tracks
+			WHERE tracks.album_id = albums.id
+		)`)
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+
+		// delete artists
+		_, err = tx.Exec(`DELETE FROM artists
+			WHERE NOT EXISTS (
+			SELECT 1
+			FROM albums
+			WHERE albums.artist_id = artists.id
+		) AND NOT EXISTS (
+			SELECT 1
+			FROM tracks
+			WHERE tracks.artist_id = artists.id
+		)`)
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+
+		// delete directories
+		query = fmt.Sprintf(
 			"DELETE FROM directories WHERE id IN (%s)",
 			strings.Join(placeholders, ","),
 		)
@@ -200,42 +241,6 @@ func DeleteDirectories(db *sql.DB, dirs map[string]lib.DirDB) error {
 				affected,
 				len(chunk),
 			)
-		}
-
-		// delete tracks
-		query = fmt.Sprintf(
-			"DELETE FROM tracks WHERE directory_id IN (%s)",
-			strings.Join(placeholders, ","),
-		)
-
-		_, err = tx.Exec(query, ids...)
-		if err != nil {
-			tx.Rollback()
-			return err
-		}
-
-		// delete tracks
-		_, err = tx.Exec(`DELETE FROM albums
-			WHERE NOT EXISTS (
-			SELECT 1
-			FROM tracks
-			WHERE tracks.album_id = albums.id
-		)`)
-		if err != nil {
-			tx.Rollback()
-			return err
-		}
-
-		// delete artists
-		_, err = tx.Exec(`DELETE FROM artists
-			WHERE NOT EXISTS (
-			SELECT 1
-			FROM albums
-			WHERE albums.artist_id = artists.id
-		)`)
-		if err != nil {
-			tx.Rollback()
-			return err
 		}
 
 		if err := tx.Commit(); err != nil {
