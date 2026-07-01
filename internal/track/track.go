@@ -2,14 +2,13 @@
 package track
 
 import (
-	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"sonary/internal/config"
 	"sonary/internal/database"
 	"sonary/internal/ffmpeg"
@@ -19,325 +18,67 @@ import (
 	"time"
 )
 
-const batchSize = 500
-
-func GetDirectories(db database.DBTX) (map[string]lib.DirDB, error) {
-	query := `
-		SELECT id, path, mtime, last_scan
-		FROM directories
-	`
-
-	rows, err := db.Query(query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var dirs = map[string]lib.DirDB{}
-
-	for rows.Next() {
-		var d lib.DirDB
-		err := rows.Scan(&d.ID, &d.Path, &d.Mtime, &d.LastScan)
-		if err != nil {
-			return nil, err
-		}
-		dirs[d.Path] = d
-	}
-
-	return dirs, nil
+func GetArtistKey(artistName string) string {
+	return strings.ToLower(artistName)
 }
 
-func GetDirectory(db database.DBTX, path string) (*lib.DirDB, error) {
-	query := `
-		SELECT id, mtime, last_scan
-		FROM directories WHERE path = ?
-	`
-
-	dir := &lib.DirDB{Path: path}
-
-	err := db.QueryRow(query, path).Scan(&dir.ID, &dir.Mtime, &dir.LastScan)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	return dir, nil
-}
-
-func SaveDirectories(db *sql.DB, dirs map[string]lib.DirScan) error {
-	for _, chunk := range utils.ChunkMap(dirs, batchSize) {
-		tx, err := db.BeginTx(context.Background(), nil)
+func GetOrAddArtist(db database.DBTX, artistName string) (int, error) {
+	ct := lib.GetImportContext(false)
+	id, ok := ct.ArtistCache[GetArtistKey(artistName)]
+	if !ok {
+		artist, err := database.GetArtist(db, lib.ArtistsGetParams{Name: utils.Ptr(artistName)})
 		if err != nil {
-			return err
-		}
-
-		stmt, err := tx.Prepare(
-			"INSERT INTO directories (path, mtime, last_scan) VALUES (?, ?, ?)",
-		)
-		if err != nil {
-			tx.Rollback()
-			return err
-		}
-
-		for dir, dirScan := range chunk {
-			_, err := stmt.Exec(dir, dirScan.Mtime, dirScan.LastScan)
-			if err != nil {
-				stmt.Close()
-				tx.Rollback()
-				return err
+			if errors.Is(err, database.ErrArtistNotFound) {
+				artistInput := &lib.Artist{Name: artistName}
+				artist, err = database.SaveArtist(db, artistInput)
+				if err != nil {
+					return 0, err
+				}
+			} else {
+				return 0, err
 			}
 		}
-
-		if err := stmt.Close(); err != nil {
-			tx.Rollback()
-			return err
-		}
-
-		if err := tx.Commit(); err != nil {
-			tx.Rollback()
-			return err
+		id = artist.ID
+		if ct.ArtistCache != nil {
+			ct.ArtistCache[GetArtistKey(artistName)] = id
 		}
 	}
-
-	return nil
+	return id, nil
 }
 
-func UpdateDirectoriesMtime(db *sql.DB, dirs map[string]lib.DirDB) error {
-	for _, chunk := range utils.ChunkMap(dirs, batchSize) {
-		tx, err := db.BeginTx(context.Background(), nil)
+func GetAlbumKey(artistName string, albumName string) string {
+	return strings.ToLower(artistName + "|" + albumName)
+}
+
+func GetOrAddAlbum(db database.DBTX, artistID int, track *lib.Track) (int, error) {
+	ct := lib.GetImportContext(false)
+	id, ok := ct.AlbumCache[GetAlbumKey(track.Artist, track.Album)]
+	if !ok {
+		album, err := database.GetAlbum(db, lib.AlbumsGetParams{
+			ArtistID: utils.Ptr(artistID), Title: utils.Ptr(track.Album),
+		})
 		if err != nil {
-			return err
-		}
-
-		stmt, err := tx.Prepare(
-			"UPDATE directories SET mtime = ?, last_scan = 0 WHERE id = ?",
-		)
-		if err != nil {
-			tx.Rollback()
-			return err
-		}
-
-		for _, dirDB := range chunk {
-			res, err := stmt.Exec(dirDB.Mtime, dirDB.ID)
-			if err != nil {
-				stmt.Close()
-				tx.Rollback()
-				return err
-			}
-
-			n, _ := res.RowsAffected()
-			if n == 0 {
-				log.Printf("directory id=%d not found", dirDB.ID)
+			if errors.Is(err, database.ErrAlbumNotFound) {
+				artistInput := &lib.Album{
+					ID:       track.ID,
+					ArtistID: artistID,
+					Title:    track.Album,
+					Year:     track.Year,
+				}
+				album, err = database.SaveAlbum(db, artistInput)
+				if err != nil {
+					return 0, err
+				}
+			} else {
+				return 0, err
 			}
 		}
-
-		stmt.Close()
-
-		if err := tx.Commit(); err != nil {
-			tx.Rollback()
-			return err
+		id = album.ID
+		if ct.AlbumCache != nil {
+			ct.AlbumCache[GetAlbumKey(track.Artist, track.Album)] = id
 		}
 	}
-
-	return nil
-}
-
-var ErrDirectoryNotFound = errors.New("directory not found")
-
-func UpdateDirectoryLastScan(db database.DBTX, dirID int) error {
-	dateNow := time.Now().Unix()
-
-	res, err := db.Exec(
-		`UPDATE directories SET last_scan = ? WHERE id = ?`,
-		dateNow, dirID)
-	if err != nil {
-		return fmt.Errorf("update directory last_scan: %w", err)
-	}
-
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("get affected rows: %w", err)
-	}
-	if n == 0 {
-		return ErrDirectoryNotFound
-	}
-
-	return nil
-}
-
-func DeleteDirectories(db *sql.DB, dirs map[string]lib.DirDB) error {
-	for _, chunk := range utils.ChunkMap(dirs, batchSize) {
-		tx, err := db.BeginTx(context.Background(), nil)
-		if err != nil {
-			return err
-		}
-
-		ids := make([]any, 0, len(chunk))
-		placeholders := make([]string, 0, len(chunk))
-
-		for _, dirDB := range chunk {
-			ids = append(ids, dirDB.ID)
-			placeholders = append(placeholders, "?")
-		}
-
-		query := fmt.Sprintf(
-			"DELETE FROM directories WHERE id IN (%s)",
-			strings.Join(placeholders, ","),
-		)
-
-		res, err := tx.Exec(query, ids...)
-		if err != nil {
-			tx.Rollback()
-			return err
-		}
-
-		affected, err := res.RowsAffected()
-		if err != nil {
-			tx.Rollback()
-			return err
-		}
-
-		if affected != int64(len(chunk)) {
-			tx.Rollback()
-			return fmt.Errorf(
-				"deleted %d rows, expected %d",
-				affected,
-				len(chunk),
-			)
-		}
-
-		// delete tracks
-		query = fmt.Sprintf(
-			"DELETE FROM tracks WHERE directory_id IN (%s)",
-			strings.Join(placeholders, ","),
-		)
-
-		_, err = tx.Exec(query, ids...)
-		if err != nil {
-			tx.Rollback()
-			return err
-		}
-
-		// delete tracks
-		_, err = tx.Exec(`DELETE FROM albums
-			WHERE NOT EXISTS (
-			SELECT 1
-			FROM tracks
-			WHERE tracks.album_id = albums.id
-		)`)
-		if err != nil {
-			tx.Rollback()
-			return err
-		}
-
-		// delete artists
-		_, err = tx.Exec(`DELETE FROM artists
-			WHERE NOT EXISTS (
-			SELECT 1
-			FROM albums
-			WHERE albums.artist_id = artists.id
-		)`)
-		if err != nil {
-			tx.Rollback()
-			return err
-		}
-
-		if err := tx.Commit(); err != nil {
-			tx.Rollback()
-			return err
-		}
-	}
-
-	return nil
-}
-
-func GetArtist(db database.DBTX, artistName string) (*lib.ArtistDB, error) {
-	query := `SELECT id FROM artists WHERE name = ?`
-
-	artist := &lib.ArtistDB{Name: artistName}
-
-	err := db.QueryRow(query, artistName).Scan(&artist.ID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	return artist, nil
-}
-
-func SaveArtist(db database.DBTX, artistInput *lib.Artist) (*lib.ArtistDB, error) {
-	artist := &lib.ArtistDB{}
-
-	err := db.QueryRow(`
-		INSERT INTO artists (name)
-		VALUES (?)
-		RETURNING id, name`,
-		artistInput.Name,
-	).Scan(&artist.ID, &artist.Name)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return artist, nil
-}
-
-func GetAlbum(db database.DBTX, artistID int, albumName string) (*lib.AlbumDB, error) {
-	query := `SELECT id, year FROM albums WHERE artist_id = ? AND title = ?`
-
-	album := &lib.AlbumDB{
-		ArtistID: artistID,
-		Title:    albumName,
-	}
-
-	err := db.QueryRow(query, artistID, albumName).Scan(&album.ID, &album.Year)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	return album, nil
-}
-
-func SaveAlbum(db database.DBTX, albumInput *lib.Album) (*lib.AlbumDB, error) {
-	album := &lib.AlbumDB{}
-
-	err := db.QueryRow(`
-		INSERT INTO albums (artist_id, title, year)
-		VALUES (?, ?, ?)
-		RETURNING id, artist_id, title, year`,
-		albumInput.ArtistID, albumInput.Title, albumInput.Year,
-	).Scan(&album.ID, &album.ArtistID, &album.Title, &album.Year)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return album, nil
-}
-
-func SaveTrack(db database.DBTX, dirID int, artistID int, track *lib.Track) (*lib.Track, error) {
-	err := db.QueryRow(`
-		INSERT INTO tracks (
-			album_id, directory_id, artist_id, path, file_type, title, year,
-			genre, track_number, duration, lyrics, is_cue, cue_file, cue_offset
-		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		RETURNING id`,
-		track.AlbumID, dirID, artistID, track.Path, track.FileType, track.Title,
-		track.Year, track.Genre, track.TrackNumber, track.Duration, track.Lyrics,
-		track.IsCue, track.CueFile, track.CueOffset,
-	).Scan(&track.ID)
-	if err != nil {
-		return nil, err
-	}
-	return track, nil
+	return id, nil
 }
 
 func SyncDirectories() (map[string]any, error) {
@@ -398,7 +139,7 @@ func SyncDirectories() (map[string]any, error) {
 		return nil
 	})
 
-	dirExists, err := GetDirectories(db)
+	dirExists, err := database.GetDirectories(db)
 	if err != nil {
 		log.Printf("Loading directories error: %v", err)
 		return nil, err
@@ -421,7 +162,7 @@ func SyncDirectories() (map[string]any, error) {
 	// new dirs
 	if len(musicDirs) > 0 {
 		log.Printf("to add: %d\n", len(musicDirs))
-		if err := SaveDirectories(db, musicDirs); err != nil {
+		if err := database.SaveDirectories(db, musicDirs); err != nil {
 			return nil, err
 		}
 	}
@@ -429,7 +170,7 @@ func SyncDirectories() (map[string]any, error) {
 	// modified dirs - update mtime
 	if len(dirsUpdate) > 0 {
 		log.Printf("to update: %d\n", len(dirsUpdate))
-		if err := UpdateDirectoriesMtime(db, dirsUpdate); err != nil {
+		if err := database.UpdateDirectoriesMtime(db, dirsUpdate); err != nil {
 			return nil, err
 		}
 	}
@@ -437,7 +178,7 @@ func SyncDirectories() (map[string]any, error) {
 	// dirs to delete
 	if len(dirExists) > 0 {
 		log.Printf("to delete: %d\n", len(dirExists))
-		if err := DeleteDirectories(db, dirExists); err != nil {
+		if err := database.DeleteDirectories(db, dirExists); err != nil {
 			return nil, err
 		}
 	}
@@ -461,11 +202,10 @@ func FormatTrackDuration(duration time.Duration) string {
 func ScanTracksInDir(path string) error {
 	db := database.GetDB()
 	cfg := config.GetConfig()
-	ct := GetImportContext(0)
 	ff := ffmpeg.NewFFmpeg()
 	root := cfg.RootPath
 
-	dir, err := GetDirectory(db, path)
+	dir, err := database.GetDirectory(db, path)
 	if err != nil {
 		log.Printf("Get directory data error: %v", path)
 		return err
@@ -489,6 +229,14 @@ func ScanTracksInDir(path string) error {
 		}
 		ext := strings.ToLower(filepath.Ext(entry.Name()))
 		if ext != ".cue" {
+			continue
+		}
+
+		// skip replay gain .cue
+		if slices.ContainsFunc([]string{" [RG].cue", "RG.cue"}, func(s string) bool {
+			return strings.HasSuffix(filepath.Base(entry.Name()), s)
+		}) {
+			log.Printf("Skipped %v", entry.Name())
 			continue
 		}
 
@@ -519,12 +267,12 @@ func ScanTracksInDir(path string) error {
 			if albumArtist == "" {
 				albumArtist = "Unknown Artist"
 			}
-			albumArtistID, er := ct.GetOrAddArtist(tx, albumArtist)
+			albumArtistID, er := GetOrAddArtist(tx, albumArtist)
 			if er != nil {
 				tx.Rollback()
 				return er
 			}
-			albumID, er := ct.GetOrAddAlbum(tx, albumArtistID, track)
+			albumID, er := GetOrAddAlbum(tx, albumArtistID, track)
 			if er != nil {
 				tx.Rollback()
 				return er
@@ -537,19 +285,19 @@ func ScanTracksInDir(path string) error {
 			if trackArtist == "" {
 				trackArtist = "Unknown Artist"
 			}
-			artistID, er := ct.GetOrAddArtist(tx, trackArtist)
+			artistID, er := GetOrAddArtist(tx, trackArtist)
 			if er != nil {
 				tx.Rollback()
 				return er
 			}
-			_, er = SaveTrack(tx, dir.ID, artistID, track)
+			_, er = database.SaveTrack(tx, dir.ID, artistID, track)
 			if er != nil {
 				tx.Rollback()
 				return er
 			}
 			log.Printf("Track saved OK '%s' : '%s'\n", relTrackPath, track.Title)
 		}
-		err = UpdateDirectoryLastScan(tx, dir.ID)
+		err = database.UpdateDirectoryLastScan(tx, dir.ID)
 		if err != nil {
 			tx.Rollback()
 			return err
@@ -588,12 +336,12 @@ func ScanTracksInDir(path string) error {
 			if albumArtist == "" {
 				albumArtist = "Unknown Artist"
 			}
-			albumArtistID, er := ct.GetOrAddArtist(tx, albumArtist)
+			albumArtistID, er := GetOrAddArtist(tx, albumArtist)
 			if er != nil {
 				tx.Rollback()
 				return er
 			}
-			albumID, er := ct.GetOrAddAlbum(tx, albumArtistID, track)
+			albumID, er := GetOrAddAlbum(tx, albumArtistID, track)
 			if er != nil {
 				tx.Rollback()
 				return er
@@ -606,12 +354,12 @@ func ScanTracksInDir(path string) error {
 			if trackArtist == "" {
 				trackArtist = "Unknown Artist"
 			}
-			artistID, er := ct.GetOrAddArtist(tx, trackArtist)
+			artistID, er := GetOrAddArtist(tx, trackArtist)
 			if er != nil {
 				tx.Rollback()
 				return er
 			}
-			_, er = SaveTrack(tx, dir.ID, artistID, track)
+			_, er = database.SaveTrack(tx, dir.ID, artistID, track)
 			if er != nil {
 				tx.Rollback()
 				return er
@@ -619,7 +367,7 @@ func ScanTracksInDir(path string) error {
 			log.Printf("Track saved OK '%s/%s'\n", dir.Path, entry.Name())
 		}
 	}
-	err = UpdateDirectoryLastScan(tx, dir.ID)
+	err = database.UpdateDirectoryLastScan(tx, dir.ID)
 	if err != nil {
 		tx.Rollback()
 		return err

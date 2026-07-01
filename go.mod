@@ -5,6 +5,7 @@ go 1.26.4
 require (
 	github.com/caarlos0/env/v11 v11.4.1
 	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
+	github.com/gorilla/websocket v1.5.3
 	github.com/joho/godotenv v1.5.1
 	golang.org/x/text v0.38.0
 	modernc.org/sqlite v1.52.0

@@ -6,54 +6,54 @@ import errorStore, { type ErrorRootState, setErrorContext, setErrorMessage } fro
 import type { Store, Unsubscribe } from 'redux'
 import { ErrorShowMode } from '@/modules/error/types'
 import appIconLibrary from '@/utils/icon-library'
-import { registerIconLibrary } from '@awesome.me/webawesome'
+import { registerIconLibrary } from '@awesome.me/webawesome/dist/webawesome.js';
 registerIconLibrary(appIconLibrary.name, { resolver: appIconLibrary.resolver })
 
 export default class BaseLitElement extends LitElement {
-    public errorStore: Store = errorStore
-    public errorStoreState: ErrorRootState = errorStore.getState()
+  public errorStore: Store = errorStore
+  public errorStoreState: ErrorRootState = errorStore.getState()
 
-    _errorStoreUnsubscribe!: Unsubscribe
+  _errorStoreUnsubscribe!: Unsubscribe
 
-    @state()
-    private _errorMessage: string = ''
+  @state()
+  private _errorMessage: string = ''
 
-    @state()
-    private _errorShowMode: ErrorShowMode = ErrorShowMode.None
+  @state()
+  private _errorShowMode: ErrorShowMode = ErrorShowMode.None
 
-    connectedCallback() {
-        super.connectedCallback()
-        this._errorStoreUnsubscribe = errorStore.subscribe(() => this.errorStateChanged(this.errorStoreState))
-        this.errorStateChanged(this.errorStoreState)
-    }
+  connectedCallback() {
+    super.connectedCallback()
+    this._errorStoreUnsubscribe = errorStore.subscribe(() => this.errorStateChanged(this.errorStoreState))
+    this.errorStateChanged(this.errorStoreState)
+  }
 
-    disconnectedCallback() {
-        this._errorStoreUnsubscribe()
-        super.disconnectedCallback()
-    }
+  disconnectedCallback() {
+    this._errorStoreUnsubscribe()
+    super.disconnectedCallback()
+  }
 
-    // error store state changed
-    errorStateChanged(errorState: ErrorRootState): void {
-        this._errorMessage = errorState.error.errorMsg
-        this._errorShowMode = errorState.error.errorShowMode
-    }
+  // error store state changed
+  errorStateChanged(errorState: ErrorRootState): void {
+    this._errorMessage = errorState.error.errorMsg
+    this._errorShowMode = errorState.error.errorShowMode
+  }
 
-    public removeError() {
-        this.errorStore.dispatch(setErrorMessage(''))
-        this.errorStore.dispatch(setErrorContext())
-    }
+  public removeError() {
+    this.errorStore.dispatch(setErrorMessage(''))
+    this.errorStore.dispatch(setErrorContext())
+  }
 
-    public getErrorMessage() {
-        return (this._errorMessage && this._errorShowMode === ErrorShowMode.Alert)
-            ? html`<wa-callout style="display: flex;" variant="danger" open>
-                    <wa-icon slot="icon" name="exclamation-octagon" library="app"></wa-icon>
-                    ${this._errorMessage}
-                </wa-callout>
-                <wa-button @click="${this.removeError}" size="small" type="button" variant="default" part="delete-error" class="delete-error">Back</wa-button>`
-            : false
-    }
+  public getErrorMessage() {
+    return (this._errorMessage && this._errorShowMode === ErrorShowMode.Alert)
+      ? html`<wa-callout style="display: flex;" variant="danger" open>
+                <wa-icon slot="icon" name="triangle-exclamation" library="default"></wa-icon>
+                ${this._errorMessage}
+            </wa-callout>
+            <wa-button @click="${this.removeError}" size="small" type="button" variant="default" part="delete-error" class="delete-error">Back</wa-button>`
+      : false
+  }
 
-    static styles = css`
+  static styles = css`
         .delete-error {
             margin-top: var(--wa-spacing-small);
         }

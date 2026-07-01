@@ -24,7 +24,14 @@ type DBTX interface {
 func GetDB() *sql.DB {
 	once.Do(func() {
 		cfg := config.GetConfig()
-		db, err := sql.Open("sqlite", cfg.DatabaseDsn)
+		db, err := sql.Open(
+			"sqlite",
+			"file:"+cfg.DatabaseDsn+"?"+
+				"_pragma=journal_mode(WAL)&"+
+				"_pragma=synchronous(NORMAL)&"+
+				"_pragma=busy_timeout(5000)&"+
+				"_pragma=foreign_keys(ON)",
+		)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -115,6 +122,9 @@ func GetDB() *sql.DB {
 			log.Printf("Table '%s' already exists. Skipping initialization.\n", tableName)
 		}
 
+		//db.SetMaxOpenConns(10)
+		//db.SetMaxIdleConns(10)
+		//db.SetConnMaxLifetime(0)
 		db.SetMaxOpenConns(1)
 		db.SetMaxIdleConns(1)
 		db.SetConnMaxLifetime(0)

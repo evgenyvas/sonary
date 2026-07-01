@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"html/template"
 	"log"
 	"net/http"
@@ -15,7 +14,9 @@ import (
 	"sonary/internal/database"
 	"sonary/internal/job"
 	"sonary/internal/lib"
+	"sonary/internal/websocket"
 	"sonary/utils"
+	"strconv"
 	"syscall"
 	"time"
 )
@@ -30,113 +31,312 @@ type API struct {
 }
 
 func (api *API) GetTracks(w http.ResponseWriter, r *http.Request) {
-	var input lib.APIPathPost
-	err := json.NewDecoder(r.Body).Decode(&input)
-	if err != nil {
+	var params lib.TracksGetParams
+	limit := 50
+	q := r.URL.Query()
+	limitStr := q.Get("limit")
+	var err error
+	if limitStr != "" {
+		limit, err = strconv.Atoi(limitStr)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	params.Limit = limit
+	page, _ := utils.QueryInt(q, "page")
+	if page > 0 {
+		params.Page = utils.Ptr(page)
+	}
+
+	var mode lib.FetchTracksMode
+	if err := mode.UnmarshalText([]byte(q.Get("mode"))); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	fmt.Println(input.Path)
-	//path := r.PathValue("path")
-
-	//notes, err := api.Store.Notes(path)
-	//if err != nil {
-	//http.Error(w, err.Error(), http.StatusBadRequest)
-	//return
-	//}
-
-	tracks := []lib.TrackOrDirectory{}
-
-	apiTracks := make([]lib.APITrackOrDirectory, len(tracks))
-	for i, track := range tracks {
-		apiTracks[i] = lib.ToAPI(track)
+	switch mode {
+	case lib.FetchTracksModeRandom:
+		params.Random = true
+	case lib.FetchTracksModeFavorites:
+		params.Like = utils.Ptr(true)
+	case lib.FetchTracksModeNoalbum:
+		params.NoAlbum = true
 	}
-	apiNotesList := lib.APITrackList{
+
+	artistID, _ := utils.QueryInt(q, "artistId")
+	if artistID > 0 {
+		params.ArtistID = utils.Ptr(artistID)
+	}
+
+	tracks, hasNext, err := database.GetTracks(api.db, params)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	apiTracks := make([]lib.APITrack, len(tracks))
+	for i, track := range tracks {
+		apiTracks[i] = track.ToAPI()
+	}
+	apiTrackList := lib.APITrackList{
 		APIStatus: lib.APIStatus{
 			Status:  http.StatusOK,
 			Message: "ok",
 		},
-		Items: apiTracks,
+		Items:   apiTracks,
+		HasNext: hasNext,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if js, err := json.Marshal(apiNotesList); err != nil {
+	if js, err := json.Marshal(apiTrackList); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	} else {
 		w.Write(js)
 	}
 }
 
-func (api *API) ScanStatus(w http.ResponseWriter, r *http.Request) {
-	var input lib.APIPathPost
-	err := json.NewDecoder(r.Body).Decode(&input)
+// get single track
+func (api *API) GetTrack(w http.ResponseWriter, r *http.Request) {
+	idVal := r.PathValue("id")
+	id, err := strconv.Atoi(idVal)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	payloadBytes, err := json.Marshal(input)
+	track, err := database.GetTrack(api.db, id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	apiTrack := lib.APITrackSingle{
+		APIStatus: lib.APIStatus{
+			Status:  http.StatusOK,
+			Message: "ok",
+		},
+		APITrack: track.ToAPI(),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(apiTrack)
+}
+
+// update single track
+func (api *API) UpdateTrack(w http.ResponseWriter, r *http.Request) {
+	idVal := r.PathValue("id")
+	id, err := strconv.Atoi(idVal)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	job, err := job.Get(api.db, job.JobFilter{
-		TaskType: utils.Ptr(job.TaskScanDirectoryTracks),
-		Payload:  utils.Ptr(string(payloadBytes)),
-		Status:   utils.Ptr([]string{job.StatusPending, job.StatusRunning, job.StatusFailed}),
+	var t lib.APITrackUpdate
+	err = json.NewDecoder(r.Body).Decode(&t)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	err = database.UpdateTrack(api.db, id, lib.TrackUpdateParams{
+		Like: utils.Ptr(t.Like),
 	})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	apiScan := lib.APIScan{
-		CreatedAt: job.CreatedAt.Format("2006-01-02 15:04:05"),
-		UpdatedAt: job.UpdatedAt.Format("2006-01-02 15:04:05"),
-		Status:    job.Status,
-		Message:   job.ErrorMessage.String,
-		Result:    string(job.Result),
+	track, err := database.GetTrack(api.db, id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
-	//percent := float64(stats.ScannedFiles.Load()) /
-	//float64(stats.TotalFiles) * 100
+	apiTrack := lib.APITrackSingle{
+		APIStatus: lib.APIStatus{
+			Status:  http.StatusOK,
+			Message: "ok",
+		},
+		APITrack: track.ToAPI(),
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if js, err := json.Marshal(apiScan); err != nil {
+	json.NewEncoder(w).Encode(apiTrack)
+}
+
+func (api *API) GetArtists(w http.ResponseWriter, r *http.Request) {
+	var params lib.ArtistsGetParams
+	limit := 50
+	q := r.URL.Query()
+	limitStr := q.Get("limit")
+	var err error
+	if limitStr != "" {
+		limit, err = strconv.Atoi(limitStr)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	params.Limit = limit
+	page, _ := utils.QueryInt(q, "page")
+	if page > 0 {
+		params.Page = utils.Ptr(page)
+	}
+
+	artists, hasNext, err := database.GetArtists(api.db, params)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	apiArtists := make([]lib.APIArtist, len(artists))
+	for i, artist := range artists {
+		apiArtists[i] = artist.ToAPI()
+	}
+	apiArtistList := lib.APIArtistList{
+		APIStatus: lib.APIStatus{
+			Status:  http.StatusOK,
+			Message: "ok",
+		},
+		Items:   apiArtists,
+		HasNext: hasNext,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if js, err := json.Marshal(apiArtistList); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	} else {
 		w.Write(js)
 	}
 }
 
-func (api *API) ScanStart(w http.ResponseWriter, r *http.Request) {
-	var input lib.APIPathPost
-	err := json.NewDecoder(r.Body).Decode(&input)
+// get single artist
+func (api *API) GetArtist(w http.ResponseWriter, r *http.Request) {
+	idVal := r.PathValue("id")
+	id, err := strconv.Atoi(idVal)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	jobId, err := job.Enqueue(api.db, job.TaskScanDirectoryTracks, input)
+	artist, err := database.GetArtist(api.db, lib.ArtistsGetParams{ID: utils.Ptr(id)})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	apiScan := lib.APIScan{
-		ID:        int(jobId),
-		CreatedAt: time.Now().Format("2006-01-02 15:04:05"),
-		Status:    job.StatusPending,
-		Message:   "Scan job successfully added",
+	apiArtist := lib.APIArtistSingle{
+		APIStatus: lib.APIStatus{
+			Status:  http.StatusOK,
+			Message: "ok",
+		},
+		APIArtist: artist.ToAPI(),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if js, err := json.Marshal(apiScan); err != nil {
+	json.NewEncoder(w).Encode(apiArtist)
+}
+
+func (api *API) GetAlbums(w http.ResponseWriter, r *http.Request) {
+	var params lib.AlbumsGetParams
+	limit := 50
+	q := r.URL.Query()
+	limitStr := q.Get("limit")
+	var err error
+	if limitStr != "" {
+		limit, err = strconv.Atoi(limitStr)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	params.Limit = limit
+	page, _ := utils.QueryInt(q, "page")
+	if page > 0 {
+		params.Page = utils.Ptr(page)
+	}
+
+	var mode lib.FetchAlbumsMode
+	if err := mode.UnmarshalText([]byte(q.Get("mode"))); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	switch mode {
+	case lib.FetchAlbumsModeRandom:
+		params.Random = true
+	}
+
+	artistID, _ := utils.QueryInt(q, "artistId")
+	if artistID > 0 {
+		params.ArtistID = utils.Ptr(artistID)
+	}
+
+	albums, hasNext, err := database.GetAlbums(api.db, params)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	apiAlbums := make([]lib.APIAlbum, len(albums))
+	for i, album := range albums {
+		apiAlbums[i] = album.ToAPI()
+	}
+	apiAlbumList := lib.APIAlbumList{
+		APIStatus: lib.APIStatus{
+			Status:  http.StatusOK,
+			Message: "ok",
+		},
+		Items:   apiAlbums,
+		HasNext: hasNext,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if js, err := json.Marshal(apiAlbumList); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	} else {
 		w.Write(js)
 	}
+}
+
+// get single album
+func (api *API) GetAlbum(w http.ResponseWriter, r *http.Request) {
+	idVal := r.PathValue("id")
+	id, err := strconv.Atoi(idVal)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	album, err := database.GetAlbum(api.db, lib.AlbumsGetParams{ID: utils.Ptr(id)})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	tracks, _, err := database.GetTracks(api.db, lib.TracksGetParams{
+		AlbumID: utils.Ptr(album.ID),
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	apiTracks := make([]lib.APITrack, len(tracks))
+	for i, track := range tracks {
+		apiTracks[i] = track.ToAPI()
+	}
+
+	apiAlbum := lib.APIAlbumSingle{
+		APIStatus: lib.APIStatus{
+			Status:  http.StatusOK,
+			Message: "ok",
+		},
+		APIAlbum: album.ToAPI(),
+		Tracks:   apiTracks,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(apiAlbum)
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -179,9 +379,13 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/v1/tracks/{path...}", api.GetTracks)
-	mux.HandleFunc("GET /api/v1/scan/status", api.ScanStatus)
-	mux.HandleFunc("POST /api/v1/scan/start", api.ScanStart)
+	mux.HandleFunc("GET /api/v1/tracks", api.GetTracks)
+	mux.HandleFunc("GET /api/v1/tracks/{id}", api.GetTrack)
+	mux.HandleFunc("PUT /api/v1/tracks/{id}", api.UpdateTrack)
+	mux.HandleFunc("GET /api/v1/artists", api.GetArtists)
+	mux.HandleFunc("GET /api/v1/artists/{id}", api.GetArtist)
+	mux.HandleFunc("GET /api/v1/albums", api.GetAlbums)
+	mux.HandleFunc("GET /api/v1/albums/{id}", api.GetAlbum)
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		tmpl := template.Must(template.ParseFiles("internal/templates/index.html"))
@@ -193,6 +397,11 @@ func main() {
 	// Serve files from the "./static" directory at the "/static/" URL path
 	fileServer := http.FileServer(http.Dir("./static"))
 	mux.Handle("/static/", http.StripPrefix("/static", fileServer))
+
+	// WebSocket
+	hub := websocket.GetHub()
+	mux.HandleFunc("/ws", websocket.WsEndpoint)
+	go hub.Run()
 
 	var handler http.Handler
 	if cfg.AppEnv == "dev" {

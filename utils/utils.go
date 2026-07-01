@@ -2,6 +2,8 @@
 package utils
 
 import (
+	"net/url"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -55,4 +57,36 @@ func ChunkMap[K comparable, V any](originalMap map[K]V, chunkSize int) []map[K]V
 	}
 
 	return chunks
+}
+
+func GetPercent(input int, total int) int {
+	percent := 0
+	if total > 0 {
+		percent = int(input*100) / total
+	}
+	return percent
+}
+
+func BoolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func QueryString(q url.Values, key string) string {
+	return q.Get(key)
+}
+
+func QueryBool(q url.Values, key string) bool {
+	v, _ := strconv.ParseBool(q.Get(key))
+	return v
+}
+
+func QueryInt(q url.Values, key string) (int, error) {
+	return strconv.Atoi(q.Get(key))
+}
+
+func QueryStrings(q url.Values, key string) []string {
+	return q[key]
 }

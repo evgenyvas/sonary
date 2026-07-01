@@ -115,6 +115,9 @@ func ParseCue(r io.Reader) (*CueSheet, error) {
 
 		case strings.HasPrefix(line, "FILE "):
 			file := parseFileLine(line)
+			if file == nil {
+				continue
+			}
 			sheet.Files = append(sheet.Files, CueFile{
 				Name: file.Name,
 				Type: file.Type,
@@ -221,10 +224,14 @@ func parseREM(line string) (string, string, bool) {
 		true
 }
 
-func parseFileLine(line string) fileInfo {
+func parseFileLine(line string) *fileInfo {
 	first := strings.Index(line, "\"")
 	last := strings.LastIndex(line, "\"")
-	return fileInfo{
+	if first >= last {
+		fmt.Println("Error: Invalid slicing bounds configuration")
+		return nil
+	}
+	return &fileInfo{
 		Name: line[first+1 : last],
 		Type: strings.TrimSpace(line[last+1:]),
 	}

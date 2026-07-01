@@ -5,10 +5,6 @@ import (
 	"time"
 )
 
-type TrackOrDirectory interface {
-	Type() string
-}
-
 type Artist struct {
 	ID   int
 	Name string
@@ -41,16 +37,9 @@ type Track struct {
 	IsLike      bool
 }
 
-func (m Artist) Type() string {
-	return "artist"
-}
-
-func (m Album) Type() string {
-	return "album"
-}
-
-func (m Track) Type() string {
-	return "track"
+type DirScan struct {
+	Mtime    int64
+	LastScan int64
 }
 
 type DirDB struct {
@@ -68,11 +57,59 @@ type ArtistDB struct {
 type AlbumDB struct {
 	ID       int
 	ArtistID int
+	Artist   string
 	Title    string
 	Year     int
 }
 
-type DirScan struct {
-	Mtime    int64
-	LastScan int64
+type TrackDB struct {
+	ID          int
+	Path        string
+	FileType    string
+	Title       string
+	Artist      string
+	ArtistID    int
+	AlbumArtist string
+	Year        int
+	Genre       string
+	Album       string
+	AlbumID     int
+	TrackNumber int
+	Duration    time.Duration
+	Lyrics      string
+	IsCue       bool
+	CueFile     string
+	CueOffset   time.Duration
+	IsLike      bool
+}
+
+type TracksGetParams struct {
+	ID       *int
+	AlbumID  *int
+	ArtistID *int
+	Random   bool
+	Limit    int
+	Page     *int
+	Like     *bool
+	NoAlbum  bool
+}
+
+type TrackUpdateParams struct {
+	Like *bool
+}
+
+type ArtistsGetParams struct {
+	ID    *int
+	Name  *string
+	Limit int
+	Page  *int
+}
+
+type AlbumsGetParams struct {
+	ID       *int
+	ArtistID *int
+	Random   bool
+	Title    *string
+	Limit    int
+	Page     *int
 }

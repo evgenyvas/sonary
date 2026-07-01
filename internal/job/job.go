@@ -8,7 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sonary/internal/database"
+	"sonary/internal/lib"
 	"sonary/internal/track"
+	"sonary/internal/websocket"
 	"sonary/utils"
 	"strings"
 	"time"
@@ -251,19 +254,22 @@ func StartWorkerPool(ctx context.Context, db *sql.DB, workerCount int) {
 
 var ErrTaskWait = errors.New("job wait for other task")
 
+var Broadcast = make(chan []byte) // Broadcast channel
+
 func processTask(db *sql.DB, job *Job) (any, error) {
 	if job.TaskType == TaskSyncDirectories {
 		res, err := track.SyncDirectories()
 		if err != nil {
-			log.Printf("Sync directories error: %v", err)
+			log.Printf("[Job %v] Sync directories error: %v", job.ID, err)
 			return nil, err
 		}
 
-		ct := track.GetImportContext(res["num"].(int))
+		ct := lib.GetImportContext(true)
+		ct.Progress.Total = res["num"].(int)
 
-		dirs, err := track.GetDirectories(db)
+		dirs, err := database.GetDirectories(db)
 		if err != nil {
-			log.Printf("Load directories error: %v", err)
+			log.Printf("[Job %v] Load directories error: %v", job.ID, err)
 			return nil, err
 		}
 
@@ -275,10 +281,9 @@ func processTask(db *sql.DB, job *Job) (any, error) {
 			// create scan job for each directory
 			_, err := Enqueue(db, TaskScanDirectoryTracks, JobPath{Path: dir.Path})
 			if err != nil {
-				log.Printf("Add job error: %v", err)
+				log.Printf("[Job %v] Add job error: %v", job.ID, err)
 				return nil, err
 			}
-			ct.Progress.Processed.Add(1)
 		}
 
 		return res, nil
@@ -289,28 +294,40 @@ func processTask(db *sql.DB, job *Job) (any, error) {
 			Status:   utils.Ptr([]string{StatusPending, StatusRunning}),
 		})
 		if err != nil {
-			log.Printf("Get job error: %v", err)
+			log.Printf("[Job %v] Get job error: %v", job.ID, err)
 			return nil, err
 		}
 		if jobDirScan != nil {
 			return nil, ErrTaskWait
 		}
 
-		ct := track.GetImportContext(0)
+		ct := lib.GetImportContext(false)
 
 		var dirScanPayload JobPath
 		err = json.Unmarshal(job.Payload, &dirScanPayload)
 		if err != nil {
-			log.Printf("JSON unmarshal error: %v", err)
+			log.Printf("[Job %v] JSON unmarshal error: %v", job.ID, err)
 			return nil, err
 		}
 
 		err = track.ScanTracksInDir(dirScanPayload.Path)
 		if err != nil {
-			log.Printf("Scan directory tracks error: %v", err)
+			log.Printf("[Job %v] Scan directory tracks error: %v", job.ID, err)
 			return nil, err
 		}
-		ct.Progress.Processed.Add(1)
+		newProcessed := int(ct.Progress.Processed.Add(1))
+		oldProcessed := newProcessed - 1
+
+		oldPercent := utils.GetPercent(oldProcessed, ct.Progress.Total)
+		newPercent := utils.GetPercent(newProcessed, ct.Progress.Total)
+
+		if newPercent > oldPercent {
+			hub := websocket.GetHub()
+			hub.Broadcast <- websocket.ProgressEvent{
+				Type:     lib.EventProgressUpdate,
+				Progress: newPercent,
+			}
+		}
 
 		return nil, nil
 	}
