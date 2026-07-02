@@ -11,8 +11,8 @@ import (
 	"github.com/dhowden/tag"
 )
 
-func scanAudioFile(ff *ffmpeg.FFmpeg, root string, path string, fileName string) (*lib.Track, error) {
-	fullPath := filepath.Join(root, path, fileName)
+func scanAudioFile(ff *ffmpeg.FFmpeg, path string, fileName string) (*lib.Track, error) {
+	fullPath := filepath.Join(path, fileName)
 	f, err := os.Open(fullPath)
 	if err != nil {
 		return nil, err

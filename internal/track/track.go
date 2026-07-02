@@ -84,60 +84,55 @@ func GetOrAddAlbum(db database.DBTX, artistID int, track *lib.Track) (int, error
 func SyncDirectories() (map[string]any, error) {
 	writeDB := database.Writer()
 	cfg := config.GetConfig()
-	root := cfg.RootPath
 
-	log.Printf("Starting to read root directory '%s'\n", root)
 	// At first - search for music dirs and sync them with database
 	var musicDirs = map[string]lib.DirScan{}
-	filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if d.IsDir() {
-			return nil
-		}
-
-		ext := strings.ToLower(filepath.Ext(path))
-
-		switch ext {
-		case ".cue", ".mp3", ".flac", ".ogg", ".m4a", ".ape", ".wav":
-			dirPath := filepath.Dir(path)
-			// Calculate the path relative to the root directory
-			relDirPath, err := filepath.Rel(root, dirPath)
-			if err != nil {
-				log.Printf("Calculate relative path error: %v", err)
-				return err
+	for _, root := range cfg.RootPaths {
+		log.Printf("Starting to read root directory '%s'\n", root)
+		filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+			if d.IsDir() {
+				return nil
 			}
-			if dir, ok := musicDirs[relDirPath]; ok {
-				// mtime max for files inside
-				fileInfo, err := os.Stat(path)
-				if err != nil {
-					log.Printf("Loading file state error: %v", err)
-					return err
-				}
-				fileMtime := fileInfo.ModTime().Unix()
-				if fileMtime > dir.Mtime {
-					musicDirs[relDirPath] = lib.DirScan{
-						Mtime:    fileMtime,
+
+			ext := strings.ToLower(filepath.Ext(path))
+
+			switch ext {
+			case ".cue", ".mp3", ".flac", ".ogg", ".m4a", ".ape", ".wav":
+				dirPath := filepath.Dir(path)
+				if dir, ok := musicDirs[dirPath]; ok {
+					// mtime max for files inside
+					fileInfo, err := os.Stat(path)
+					if err != nil {
+						log.Printf("Loading file state error: %v", err)
+						return err
+					}
+					fileMtime := fileInfo.ModTime().Unix()
+					if fileMtime > dir.Mtime {
+						musicDirs[dirPath] = lib.DirScan{
+							Mtime:    fileMtime,
+							LastScan: 0,
+						}
+					}
+				} else {
+					dirInfo, err := os.Stat(dirPath)
+					if err != nil {
+						log.Printf("Loading directory state error: %v", err)
+						return err
+					}
+					// Skip the root directory itself (which evaluates to ".")
+					if dirPath == "." {
+						return nil
+					}
+					musicDirs[dirPath] = lib.DirScan{
+						Mtime:    dirInfo.ModTime().Unix(),
 						LastScan: 0,
 					}
 				}
-			} else {
-				dirInfo, err := os.Stat(dirPath)
-				if err != nil {
-					log.Printf("Loading directory state error: %v", err)
-					return err
-				}
-				// Skip the root directory itself (which evaluates to ".")
-				if relDirPath == "." {
-					return nil
-				}
-				musicDirs[relDirPath] = lib.DirScan{
-					Mtime:    dirInfo.ModTime().Unix(),
-					LastScan: 0,
-				}
 			}
-		}
 
-		return nil
-	})
+			return nil
+		})
+	}
 
 	dirExists, err := database.GetDirectories(writeDB)
 	if err != nil {
@@ -201,9 +196,7 @@ func FormatTrackDuration(duration time.Duration) string {
 
 func ScanTracksInDir(path string) error {
 	writeDB := database.Writer()
-	cfg := config.GetConfig()
 	ff := ffmpeg.NewFFmpeg()
-	root := cfg.RootPath
 
 	dir, err := database.GetDirectory(writeDB, path)
 	if err != nil {
@@ -211,8 +204,7 @@ func ScanTracksInDir(path string) error {
 		return err
 	}
 
-	fullPath := filepath.Join(root, dir.Path)
-	entries, err := os.ReadDir(fullPath)
+	entries, err := os.ReadDir(path)
 	if err != nil {
 		log.Printf("Loading directory content error: %v", path)
 		return err
@@ -241,7 +233,7 @@ func ScanTracksInDir(path string) error {
 		}
 
 		// parse CUE
-		tracks, er := scanCue(ff, root, dir.Path, entry.Name())
+		tracks, er := scanCue(ff, dir.Path, entry.Name())
 		if er != nil {
 			log.Printf("Scan CUE error: %v", path)
 			return er
@@ -257,6 +249,7 @@ func ScanTracksInDir(path string) error {
 		for _, track := range tracks {
 			relTrackPath, er := filepath.Rel(dir.Path, track.Path)
 			if er != nil {
+				tx.Rollback()
 				return er
 			}
 			skipFiles[relTrackPath] = struct{}{}
@@ -324,8 +317,9 @@ func ScanTracksInDir(path string) error {
 		switch ext {
 		case ".mp3", ".flac", ".ogg", ".m4a", ".wav":
 			// audio track - read tags
-			track, er := scanAudioFile(ff, root, dir.Path, entry.Name())
+			track, er := scanAudioFile(ff, dir.Path, entry.Name())
 			if er != nil {
+				tx.Rollback()
 				return er
 			}
 			log.Printf("Tags scanned successfully '%s/%s'\n", path, entry.Name())

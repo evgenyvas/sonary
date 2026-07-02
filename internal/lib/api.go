@@ -10,20 +10,22 @@ type APIStatus struct {
 }
 
 type APITrack struct {
-	ID          int    `json:"id"`
-	FileType    string `json:"type"`
-	Title       string `json:"title"`
-	Artist      string `json:"artist"`
-	ArtistID    int    `json:"artist_id"`
-	AlbumArtist string `json:"albumArtist"`
-	Year        int    `json:"year"`
-	Genre       string `json:"genre"`
-	Album       string `json:"album"`
-	AlbumID     int    `json:"album_id"`
-	TrackNumber int    `json:"number"`
-	Duration    int    `json:"duration"`
-	Lyrics      string `json:"lyrics"`
-	IsLike      bool   `json:"like"`
+	ID             int    `json:"id"`
+	FileType       string `json:"type"`
+	Title          string `json:"title"`
+	Artist         string `json:"artist"`
+	ArtistID       int    `json:"artist_id"`
+	AlbumArtist    string `json:"albumArtist"`
+	Year           int    `json:"year"`
+	Genre          string `json:"genre"`
+	Album          string `json:"album"`
+	AlbumID        int    `json:"album_id"`
+	TrackNumber    int    `json:"number"`
+	Duration       int    `json:"duration"`
+	HasPregap      bool   `json:"pregap"`
+	PregapDuration int    `json:"pregap_duration"`
+	Lyrics         string `json:"lyrics"`
+	IsLike         bool   `json:"like"`
 }
 
 type APITrackSingle struct {
@@ -48,20 +50,22 @@ type APIProgress struct {
 
 func (t *TrackDB) ToAPI() APITrack {
 	return APITrack{
-		ID:          t.ID,
-		FileType:    t.FileType,
-		Title:       t.Title,
-		Artist:      t.Artist,
-		ArtistID:    t.ArtistID,
-		AlbumArtist: t.AlbumArtist,
-		Year:        t.Year,
-		Genre:       t.Genre,
-		Album:       t.Album,
-		AlbumID:     t.AlbumID,
-		TrackNumber: t.TrackNumber,
-		Duration:    int(t.Duration.Seconds()),
-		Lyrics:      t.Lyrics,
-		IsLike:      t.IsLike,
+		ID:             t.ID,
+		FileType:       t.FileType,
+		Title:          t.Title,
+		Artist:         t.Artist,
+		ArtistID:       t.ArtistID,
+		AlbumArtist:    t.AlbumArtist,
+		Year:           t.Year,
+		Genre:          t.Genre,
+		Album:          t.Album,
+		AlbumID:        t.AlbumID,
+		TrackNumber:    t.TrackNumber,
+		Duration:       int(t.Duration.Seconds()),
+		HasPregap:      t.HasPregap,
+		PregapDuration: int(t.PregapDuration.Seconds()),
+		Lyrics:         t.Lyrics,
+		IsLike:         t.IsLike,
 	}
 }
 
@@ -156,4 +160,10 @@ func (m *FetchAlbumsMode) UnmarshalText(text []byte) error {
 	default:
 		return fmt.Errorf("invalid mode: %q", text)
 	}
+}
+
+type APITrackConvertPost struct {
+	Format  string `json:"format"`
+	Mode    string `json:"mode"`
+	Quality string `json:"quality"`
 }

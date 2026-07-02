@@ -2,19 +2,21 @@
 package config
 
 import (
+	"encoding/json"
 	"log"
 	"os"
+	"reflect"
 
 	"github.com/caarlos0/env/v11"
 	"github.com/joho/godotenv"
 )
 
 type Config struct {
-	Host        string `env:"HOST"`
-	AppEnv      string `env:"APP_ENV"`
-	RootPath    string `env:"ROOT_PATH"`
-	DatabaseDsn string `env:"DATABASE_DSN"`
-	WorkerCount int    `env:"WORKER_COUNT"`
+	Host        string   `env:"HOST"`
+	AppEnv      string   `env:"APP_ENV"`
+	RootPaths   []string `env:"ROOT_PATHS"`
+	DatabaseDsn string   `env:"DATABASE_DSN"`
+	WorkerCount int      `env:"WORKER_COUNT"`
 }
 
 var instance *Config
@@ -32,7 +34,16 @@ func init() {
 	godotenv.Overload(".env.local")
 
 	cfg := Config{}
-	if err := env.Parse(&cfg); err != nil {
+	options := env.Options{
+		FuncMap: map[reflect.Type]env.ParserFunc{
+			reflect.TypeFor[[]string](): func(v string) (any, error) {
+				var s []string
+				err := json.Unmarshal([]byte(v), &s)
+				return s, err
+			},
+		},
+	}
+	if err := env.ParseWithOptions(&cfg, options); err != nil {
 		log.Fatalf("Failed to parse environment variables: %v", err)
 	}
 	instance = &cfg

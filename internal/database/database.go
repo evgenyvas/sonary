@@ -122,6 +122,8 @@ func initDatabase(db DBTX) {
 				genre TEXT,
 				track_number INTEGER,
 				duration INTEGER,
+				has_pregap BOOLEAN NOT NULL DEFAULT 0,
+				pregap_duration INTEGER,
 				lyrics TEXT,
 
 				is_cue BOOLEAN NOT NULL DEFAULT 0,

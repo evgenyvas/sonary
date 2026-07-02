@@ -223,6 +223,12 @@ func CancelJobs(db *sql.DB) error {
 func StartWorkerPool(ctx context.Context, db *sql.DB, workerCount int) {
 	for i := 1; i <= workerCount; i++ {
 		go func(workerID int) {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("worker %d panic: %v", workerID, r)
+				}
+			}()
+
 			ticker := time.NewTicker(1000 * time.Millisecond)
 			defer ticker.Stop()
 
@@ -248,14 +254,20 @@ func StartWorkerPool(ctx context.Context, db *sql.DB, workerCount int) {
 						if errors.Is(err, ErrTaskWait) {
 							log.Printf("[Worker %d] Job %d is waiting for other task: %v", workerID, job.ID, err)
 							time.Sleep(3 * time.Second) // wait some time
-							_ = UpdateStatus(db, job.ID, StatusPending, nil, "")
+							if err := UpdateStatus(db, job.ID, StatusPending, nil, ""); err != nil {
+								log.Printf("UpdateStatus error: %v", err)
+							}
 						} else {
 							log.Printf("[Worker %d] Job %d Failed: %v", workerID, job.ID, err)
-							_ = UpdateStatus(db, job.ID, StatusFailed, nil, err.Error())
+							if err := UpdateStatus(db, job.ID, StatusFailed, nil, err.Error()); err != nil {
+								log.Printf("UpdateStatus error: %v", err)
+							}
 						}
 					} else {
 						log.Printf("[Worker %d] Job %d Completed", workerID, job.ID)
-						_ = UpdateStatus(db, job.ID, StatusCompleted, result, "")
+						if err := UpdateStatus(db, job.ID, StatusCompleted, result, ""); err != nil {
+							log.Printf("UpdateStatus error: %v", err)
+						}
 					}
 				}
 			}
@@ -324,23 +336,26 @@ func processTask(db *sql.DB, job *Job) (any, error) {
 			return nil, err
 		}
 
+		defer func() {
+			newProcessed := int(ct.Progress.Processed.Add(1))
+			oldProcessed := newProcessed - 1
+
+			oldPercent := utils.GetPercent(oldProcessed, ct.Progress.Total)
+			newPercent := utils.GetPercent(newProcessed, ct.Progress.Total)
+
+			if newPercent > oldPercent {
+				hub := websocket.GetHub()
+				hub.Broadcast <- websocket.ProgressEvent{
+					Type:     lib.EventProgressUpdate,
+					Progress: newPercent,
+				}
+			}
+		}()
+
 		err = track.ScanTracksInDir(dirScanPayload.Path)
 		if err != nil {
 			log.Printf("[Job %v] Scan directory tracks error: %v", job.ID, err)
 			return nil, err
-		}
-		newProcessed := int(ct.Progress.Processed.Add(1))
-		oldProcessed := newProcessed - 1
-
-		oldPercent := utils.GetPercent(oldProcessed, ct.Progress.Total)
-		newPercent := utils.GetPercent(newProcessed, ct.Progress.Total)
-
-		if newPercent > oldPercent {
-			hub := websocket.GetHub()
-			hub.Broadcast <- websocket.ProgressEvent{
-				Type:     lib.EventProgressUpdate,
-				Progress: newPercent,
-			}
 		}
 
 		return nil, nil

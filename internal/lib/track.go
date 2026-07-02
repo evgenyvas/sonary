@@ -18,23 +18,25 @@ type Album struct {
 }
 
 type Track struct {
-	ID          int
-	AlbumID     int
-	Path        string
-	FileType    string
-	Title       string
-	Artist      string
-	AlbumArtist string
-	Year        int
-	Genre       string
-	Album       string
-	TrackNumber int
-	Duration    time.Duration
-	Lyrics      string
-	IsCue       bool
-	CueFile     string
-	CueOffset   time.Duration
-	IsLike      bool
+	ID             int
+	AlbumID        int
+	Path           string
+	FileType       string
+	Title          string
+	Artist         string
+	AlbumArtist    string
+	Year           int
+	Genre          string
+	Album          string
+	TrackNumber    int
+	Duration       time.Duration
+	HasPregap      bool
+	PregapDuration time.Duration
+	Lyrics         string
+	IsCue          bool
+	CueFile        string
+	CueOffset      time.Duration
+	IsLike         bool
 }
 
 type DirScan struct {
@@ -63,24 +65,26 @@ type AlbumDB struct {
 }
 
 type TrackDB struct {
-	ID          int
-	Path        string
-	FileType    string
-	Title       string
-	Artist      string
-	ArtistID    int
-	AlbumArtist string
-	Year        int
-	Genre       string
-	Album       string
-	AlbumID     int
-	TrackNumber int
-	Duration    time.Duration
-	Lyrics      string
-	IsCue       bool
-	CueFile     string
-	CueOffset   time.Duration
-	IsLike      bool
+	ID             int
+	Path           string
+	FileType       string
+	Title          string
+	Artist         string
+	ArtistID       int
+	AlbumArtist    string
+	Year           int
+	Genre          string
+	Album          string
+	AlbumID        int
+	TrackNumber    int
+	Duration       time.Duration
+	HasPregap      bool
+	PregapDuration time.Duration
+	Lyrics         string
+	IsCue          bool
+	CueFile        string
+	CueOffset      time.Duration
+	IsLike         bool
 }
 
 type TracksGetParams struct {
@@ -112,4 +116,10 @@ type AlbumsGetParams struct {
 	Title    *string
 	Limit    int
 	Page     *int
+}
+
+type ConvertParams struct {
+	Format  string
+	Mode    string
+	Quality string
 }

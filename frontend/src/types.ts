@@ -25,6 +25,8 @@ export interface Track {
     album_id: number,
     number: number,
     duration: number,
+    pregap: boolean,
+    pregap_duration: number,
     lyrics: string,
     like: boolean,
 }
@@ -53,3 +55,9 @@ export type EventMsg = {
         type: K
     } & EventMap[K]
 }[keyof EventMap]
+
+export interface ConvertTrackParams {
+    format: string,
+    mode: string,
+    quality: string,
+}

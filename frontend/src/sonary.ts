@@ -84,7 +84,7 @@ export class SonaryApp extends SonaryLitElement {
             render: ({ id }) => html`
         <wa-breadcrumb>
           <span slot="separator">/</span>
-          <wa-breadcrumb-item href="${import.meta.env.VITE_BASE_APP_ROUTE}">Albums</wa-breadcrumb-item>
+          <wa-breadcrumb-item href="${import.meta.env.VITE_BASE_APP_ROUTE}albums">Albums</wa-breadcrumb-item>
           <wa-breadcrumb-item>View album</wa-breadcrumb-item>
         </wa-breadcrumb>
         <sonary-albums-view .id="${id}" .baseRoute="${import.meta.env.VITE_BASE_APP_ROUTE}"></sonary-albums-view>

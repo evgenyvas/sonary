@@ -50,8 +50,10 @@ type Track struct {
 
 	Indexes []Index
 
-	StartFrame  int
-	LengthFrame int
+	StartFrame       int // INDEX 01
+	EndBoundaryFrame int // The point where this track is guaranteed to end
+	LengthFrame      int
+	HasPregap        bool
 }
 
 type Index struct {
@@ -132,7 +134,9 @@ func ParseCue(r io.Reader) (*CueSheet, error) {
 			}
 			var num int
 			var typ string
-			fmt.Sscanf(line, "TRACK %d %s", &num, &typ)
+			if n, err := fmt.Sscanf(line, "TRACK %d %s", &num, &typ); err != nil || n < 2 {
+				continue
+			}
 			currentFile.Tracks =
 				append(currentFile.Tracks, Track{
 					Number: num,
@@ -154,6 +158,9 @@ func ParseCue(r io.Reader) (*CueSheet, error) {
 			var num int
 			var pos string
 			fmt.Sscanf(line, "INDEX %d %s", &num, &pos)
+			if num == 0 {
+				currentTrack.HasPregap = true
+			}
 			frame, err := parseFrame(pos)
 			if err != nil {
 				continue
@@ -225,16 +232,28 @@ func parseREM(line string) (string, string, bool) {
 }
 
 func parseFileLine(line string) *fileInfo {
-	first := strings.Index(line, "\"")
-	last := strings.LastIndex(line, "\"")
-	if first >= last {
-		fmt.Println("Error: Invalid slicing bounds configuration")
-		return nil
+	line = strings.TrimSpace(line[5:]) // Remove prefix "FILE "
+
+	// Variant 1: filename inside quotes
+	if strings.HasPrefix(line, "\"") {
+		last := strings.LastIndex(line, "\"")
+		if last > 0 {
+			return &fileInfo{
+				Name: line[1:last],
+				Type: strings.TrimSpace(line[last+1:]),
+			}
+		}
 	}
-	return &fileInfo{
-		Name: line[first+1 : last],
-		Type: strings.TrimSpace(line[last+1:]),
+
+	// Variant 2: filename without quotes (split by last space)
+	parts := strings.Fields(line)
+	if len(parts) >= 2 {
+		return &fileInfo{
+			Name: strings.Join(parts[:len(parts)-1], " "),
+			Type: parts[len(parts)-1],
+		}
 	}
+	return nil
 }
 
 func unquote(s string) string {
@@ -256,12 +275,21 @@ func calculateTrackStarts(sheet *CueSheet) {
 		file := &sheet.Files[fi]
 		for ti := range file.Tracks {
 			track := &file.Tracks[ti]
+
+			// we need two different points
+			minFrame := math.MaxInt32
+
 			for _, idx := range track.Indexes {
+				// INDEX 00 or 01 - take the very first one to determine the physical boundary
+				if idx.Frame < minFrame {
+					minFrame = idx.Frame
+				}
+				// INDEX 01 - this is the official beginning of music
 				if idx.Number == 1 {
 					track.StartFrame = idx.Frame
-					break
 				}
 			}
+			track.EndBoundaryFrame = minFrame
 		}
 	}
 }
@@ -272,13 +300,15 @@ func CalculateDurations(sheet *CueSheet) {
 		for ti := range file.Tracks {
 			current := &file.Tracks[ti]
 			if ti < len(file.Tracks)-1 {
-				current.LengthFrame =
-					file.Tracks[ti+1].StartFrame -
-						current.StartFrame
+				// count the duration strictly BEFORE THE START (INDEX 00/01) of the next track
+				nextTrack := &file.Tracks[ti+1]
+				current.LengthFrame = nextTrack.EndBoundaryFrame - current.StartFrame
 			} else {
-				current.LengthFrame =
-					file.TotalFrames -
-						current.StartFrame
+				// for the last track, we count to the end of the entire file.
+				// calculate the pregap length of the current (last) track
+				pregapLength := current.StartFrame - current.EndBoundaryFrame
+				// subtract the pregap from the total file length
+				current.LengthFrame = file.TotalFrames - current.StartFrame - pregapLength
 			}
 		}
 	}
@@ -312,10 +342,9 @@ func DecodeCue(data []byte) string {
 	return string(data)
 }
 
-func scanCue(ff *ffmpeg.FFmpeg, root string, path string, cueFile string) ([]*lib.Track, error) {
+func scanCue(ff *ffmpeg.FFmpeg, path string, cueFile string) ([]*lib.Track, error) {
 	log.Printf("Scanning CUE... '%s'\n", cueFile)
-	fullPath := filepath.Join(root, path)
-	cueData, err := os.ReadFile(filepath.Join(fullPath, cueFile))
+	cueData, err := os.ReadFile(filepath.Join(path, cueFile))
 	if err != nil {
 		log.Printf("Reading CUE error: %v", err)
 		return nil, err
@@ -329,12 +358,12 @@ func scanCue(ff *ffmpeg.FFmpeg, root string, path string, cueFile string) ([]*li
 	log.Printf("CUE parsed OK '%s'\n", cueFile)
 
 	// get lyrics if exists
-	lyrics, _ := GetLyrics(fullPath)
+	lyrics, _ := GetLyrics(path)
 
 	for fi := range cue.Files {
 		file := &cue.Files[fi]
 		duration, err := ff.Duration(filepath.Join(
-			fullPath, strings.ReplaceAll(file.Name, "\\", string(os.PathSeparator))))
+			path, strings.ReplaceAll(file.Name, "\\", string(os.PathSeparator))))
 		if err != nil {
 			log.Printf("Load duration error: %v", err)
 			return nil, err
@@ -353,21 +382,27 @@ func scanCue(ff *ffmpeg.FFmpeg, root string, path string, cueFile string) ([]*li
 		file := &cue.Files[fi]
 		for ti := range file.Tracks {
 			track := &file.Tracks[ti]
+			var pregapDuration time.Duration
+			if track.HasPregap {
+				pregapDuration = FramesToDuration(track.StartFrame - track.EndBoundaryFrame)
+			}
 			tracks = append(tracks, &lib.Track{
-				Path:        filepath.Join(path, file.Name),
-				FileType:    strings.ToUpper(strings.ReplaceAll(file.Ext, ".", "")),
-				Title:       track.Title,
-				Artist:      track.Performer,
-				AlbumArtist: cue.Performer,
-				Year:        cue.Year(),
-				Genre:       cue.Genre(),
-				Album:       album,
-				TrackNumber: track.Number,
-				Duration:    FramesToDuration(track.LengthFrame),
-				Lyrics:      GetLyricsForTrack(lyrics, track.Title),
-				IsCue:       true,
-				CueFile:     filepath.Join(path, cueFile),
-				CueOffset:   FramesToDuration(track.StartFrame),
+				Path:           filepath.Join(path, strings.ReplaceAll(file.Name, "\\", string(os.PathSeparator))),
+				FileType:       strings.ToUpper(strings.ReplaceAll(file.Ext, ".", "")),
+				Title:          track.Title,
+				Artist:         track.Performer,
+				AlbumArtist:    cue.Performer,
+				Year:           cue.Year(),
+				Genre:          cue.Genre(),
+				Album:          album,
+				TrackNumber:    track.Number,
+				Duration:       FramesToDuration(track.LengthFrame),
+				HasPregap:      track.HasPregap,
+				PregapDuration: pregapDuration,
+				Lyrics:         GetLyricsForTrack(lyrics, track.Title),
+				IsCue:          true,
+				CueFile:        filepath.Join(path, cueFile),
+				CueOffset:      FramesToDuration(track.StartFrame),
 			})
 		}
 	}

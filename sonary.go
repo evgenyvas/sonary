@@ -5,13 +5,16 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html/template"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"sonary/internal/config"
 	"sonary/internal/database"
+	"sonary/internal/ffmpeg"
 	"sonary/internal/job"
 	"sonary/internal/lib"
 	"sonary/internal/websocket"
@@ -340,6 +343,75 @@ func (api *API) GetAlbum(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(apiAlbum)
 }
 
+// convert track to other format and download result immediately
+func (api *API) ConvertTrack(w http.ResponseWriter, r *http.Request) {
+	var conv lib.APITrackConvertPost
+	err := json.NewDecoder(r.Body).Decode(&conv)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	idVal := r.PathValue("id")
+	id, err := strconv.Atoi(idVal)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	track, err := database.GetTrack(api.readDB, id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// check if audio file exists (cannot use Open, because ffmpeg can open too)
+	if _, err := os.Stat(track.Path); os.IsNotExist(err) {
+		http.Error(w, "Source file not found", http.StatusNotFound)
+		return
+	}
+
+	/*
+		//Этот трек содержит прегап длительностью 00:02. Хотите добавить его к началу песни?
+		startDuration := track.CueOffset
+		durationSec := track.Duration
+
+		// Если юзер попросил прегап и он есть у трека в базе
+		if conv.IncludePregap && track.HasPregap {
+			// Сдвигаем точку старта назад на длину прегапа (попадаем на INDEX 00)
+			startDuration = track.CueOffset - track.PregapDuration
+
+			// Увеличиваем общую длину отрезка, чтобы захватить этот прегап
+			durationSec = track.Duration + track.PregapDuration
+		}
+	*/
+
+	w.Header().Set("Content-Type", "audio/mpeg")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.%s"`, track.Title, conv.Format))
+	w.Header().Set("Access-Control-Expose-Headers", "Content-Disposition")
+
+	if track.FileType == "MP3" {
+		// no need to convert
+		file, err := os.Open(track.Path)
+		if err != nil {
+			http.Error(w, "File not found", http.StatusNotFound)
+			return
+		}
+		defer file.Close()
+		io.Copy(w, file)
+	} else {
+		ff := ffmpeg.NewFFmpeg()
+		err = ff.ConvertTrackStream(track, w, lib.ConvertParams{
+			Format:  conv.Format,
+			Mode:    conv.Mode,
+			Quality: conv.Quality,
+		})
+		if err != nil {
+			log.Printf("Conversion method failed: %v", err)
+		}
+	}
+}
+
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -396,6 +468,7 @@ func main() {
 	mux.HandleFunc("GET /api/v1/artists/{id}", api.GetArtist)
 	mux.HandleFunc("GET /api/v1/albums", api.GetAlbums)
 	mux.HandleFunc("GET /api/v1/albums/{id}", api.GetAlbum)
+	mux.HandleFunc("POST /api/v1/tracks/{id}/convert", api.ConvertTrack)
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		tmpl := template.Must(template.ParseFiles("internal/templates/index.html"))

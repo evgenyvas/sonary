@@ -290,13 +290,14 @@ func SaveTrack(db DBTX, dirID int, artistID int, track *lib.Track) (*lib.Track, 
 	err := db.QueryRow(`
 		INSERT INTO tracks (
 			album_id, directory_id, artist_id, path, file_type, title, year,
-			genre, track_number, duration, lyrics, is_cue, cue_file, cue_offset
+			genre, track_number, duration, has_pregap, pregap_duration, lyrics,
+			is_cue, cue_file, cue_offset
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		RETURNING id`,
 		track.AlbumID, dirID, artistID, track.Path, track.FileType, track.Title,
-		track.Year, track.Genre, track.TrackNumber, track.Duration, track.Lyrics,
-		track.IsCue, track.CueFile, track.CueOffset,
+		track.Year, track.Genre, track.TrackNumber, track.Duration, track.HasPregap,
+		track.PregapDuration, track.Lyrics, track.IsCue, track.CueFile, track.CueOffset,
 	).Scan(&track.ID)
 	if err != nil {
 		return nil, err
@@ -323,7 +324,8 @@ func GetTracks(db *sql.DB, params lib.TracksGetParams) ([]lib.TrackDB, bool, err
 	sb.WriteString(`
 		SELECT t.id, t.path, t.file_type, t.title, ar.name, t.artist_id, alr.name,
 				t.year, t.genre, al.title, t.album_id, t.track_number, t.duration,
-				t.lyrics, t.is_cue, t.cue_file, t.cue_offset, t.is_like
+				t.has_pregap, t.pregap_duration, t.lyrics, t.is_cue, t.cue_file,
+				t.cue_offset, t.is_like
 		FROM tracks t
 		LEFT JOIN albums al ON al.id = t.album_id
 		LEFT JOIN artists ar ON ar.id = t.artist_id
@@ -401,7 +403,8 @@ func GetTracks(db *sql.DB, params lib.TracksGetParams) ([]lib.TrackDB, bool, err
 
 		err := rows.Scan(&t.ID, &t.Path, &t.FileType, &t.Title, &t.Artist, &t.ArtistID,
 			&t.AlbumArtist, &t.Year, &t.Genre, &t.Album, &t.AlbumID, &t.TrackNumber,
-			&t.Duration, &t.Lyrics, &t.IsCue, &t.CueFile, &t.CueOffset, &t.IsLike)
+			&t.Duration, &t.HasPregap, &t.PregapDuration, &t.Lyrics, &t.IsCue, &t.CueFile,
+			&t.CueOffset, &t.IsLike)
 		if err != nil {
 			return nil, false, err
 		}

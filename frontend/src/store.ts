@@ -1,6 +1,6 @@
 import { legacy_createStore as createStore, combineReducers, applyMiddleware } from 'redux'
 import { thunk } from 'redux-thunk'
-import type { Track, Artist, Album } from '@/types'
+import type { Track, Artist, Album, ConvertTrackParams } from '@/types'
 import httpClient, { flatten } from '@/utils/request'
 
 export interface TracksQuery {
@@ -434,6 +434,50 @@ export const fetchAlbum = (albumId: number): any => {
                     albumId: albumId,
                 })))
             })
+    }
+}
+
+export const convertTrack = (trackId: number, params: ConvertTrackParams): any => {
+    return async () => {
+        try {
+            const response = await httpClient.raw<Blob, 'blob'>('/v1/tracks/' + trackId + '/convert', {
+                method: 'POST',
+                body: params,
+                responseType: 'blob'
+            })
+
+            const blob = response._data
+            if (!blob) throw new Error('File not received')
+
+            // get filename from response header
+            const contentDisposition = response.headers.get('Content-Disposition')
+
+            // default name
+            let filename = 'song.' + params.format
+
+            if (contentDisposition) {
+                // Search for filename="name.ext" or filename=name.ext
+                const filenameMatch = contentDisposition.match(/filename="([^"]+)"/i)
+                if (filenameMatch && filenameMatch[1]) {
+                    filename = filenameMatch[1].replace(/['"]/g, '')
+                }
+            }
+
+            // start download
+            const url = window.URL.createObjectURL(blob)
+            const link = document.createElement('a')
+            link.href = url
+            link.setAttribute('download', filename)
+
+            document.body.appendChild(link)
+            link.click()
+
+            link.remove()
+            window.URL.revokeObjectURL(url)
+
+        } catch (error) {
+            console.error('Ошибка при скачивании трека:', error)
+        }
     }
 }
 

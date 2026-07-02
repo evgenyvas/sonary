@@ -3,11 +3,11 @@ import { html } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { ref, createRef, type Ref } from 'lit/directives/ref.js'
 import { repeat } from 'lit/directives/repeat.js'
-import type { Track } from '@/types'
+import type { Track, ConvertTrackParams } from '@/types'
 import store, {
-  fetchTracks, setProgressIndeterminate, setTrackItem, updateTrack, getTracksKey,
-  type RootState, type updateTrackParams, type TracksQuery, fetchTracksMode,
-  setCurrentTracksKey, deleteItem
+    fetchTracks, setProgressIndeterminate, setTrackItem, updateTrack, getTracksKey,
+    type RootState, type updateTrackParams, type TracksQuery, fetchTracksMode,
+    setCurrentTracksKey, deleteItem, convertTrack
 } from '@/store'
 import { formatDynamicTime } from '@/utils/func'
 import '@awesome.me/webawesome/dist/components/format-date/format-date.js'
@@ -22,115 +22,130 @@ import { notify } from '@/utils/notifier'
 
 @customElement('sonary-tracks-list')
 export class TracksList extends SonaryLitElement {
-  @state()
-  private _items: Track[] = []
+    @state()
+    private _items: Track[] = []
 
-  @state()
-  private _page: number | null = null
+    @state()
+    private _page: number | null = null
 
-  @state()
-  private _selectedItem: Track | null = null
+    @state()
+    private _selectedItem: Track | null = null
 
-  @state()
-  private _isLoading: boolean = false
+    @state()
+    private _isLoading: boolean = false
 
-  @state()
-  private _hasNext: boolean = false
+    @state()
+    private _hasNext: boolean = false
 
-  @property({ type: Number })
-  artistId: number | null = null
+    @property({ type: Number })
+    artistId: number | null = null
 
-  @property({ type: Number })
-  albumId: number | null = null
+    @property({ type: Number })
+    albumId: number | null = null
 
-  @property({ type: Number })
-  limit = 50
+    @property({ type: Number })
+    limit = 50
 
-  @property({ type: String })
-  mode: fetchTracksMode = fetchTracksMode.All
+    @property({ type: String })
+    mode: fetchTracksMode = fetchTracksMode.All
 
-  @property({ type: String, attribute: 'base-route' })
-  baseRoute: string = '/'
+    @property({ type: String, attribute: 'base-route' })
+    baseRoute: string = '/'
 
-  private get query(): TracksQuery {
-    return {
-      mode: this.mode,
-      artistId: this.artistId ?? undefined,
-      albumId: this.albumId ?? undefined,
-    }
-  }
-
-  private get queryKey(): string {
-    return getTracksKey(this.query)
-  }
-
-  connectedCallback() {
-    super.connectedCallback()
-    if (this.storeState.tracks.currentKey !== this.queryKey) {
-      this._loadItems()
-    }
-  }
-
-  // store state changed
-  stateChanged(state: RootState): void {
-    super.stateChanged(state)
-    this._items = state.tracks.items
-    this._hasNext = state.tracks.hasNext
-  }
-
-  _loadItems() {
-    this._isLoading = true
-    this.store.dispatch(setCurrentTracksKey(this.queryKey))
-    this.store.dispatch(setProgressIndeterminate(true))
-    store.dispatch(fetchTracks(this.query, this.limit, this._page)).then(() => {
-      this._isLoading = false
-      this.store.dispatch(setProgressIndeterminate(false))
-    })
-  }
-
-  _loadMore() {
-    if (!this._page) {
-      this._page = 1
-    }
-    this._page++
-    this._loadItems()
-  }
-
-  _viewLyrics(track: Track) {
-    this._selectedItem = { ...track }
-    const dialog: any = this.viewLyricsDialogRef.value!
-    dialog.open = true
-  }
-
-  viewLyricsDialogRef: Ref<HTMLInputElement> = createRef()
-
-  private _delDialogHide() {
-    this._selectedItem = null
-    this.store.dispatch(setTrackItem(null))
-  }
-
-  _toggleLike(track: Track) {
-    this._isLoading = true
-    this.store.dispatch(setProgressIndeterminate(true))
-    let val = !track.like
-    store.dispatch(updateTrack(<number>track.id, <updateTrackParams>{
-      like: val
-    })).then(() => {
-      this._isLoading = false
-      this.store.dispatch(setProgressIndeterminate(false))
-      if (val) {
-        notify('Added to favorites', 'success')
-      } else {
-        notify('Removed from favorites', 'success')
-        if (this.mode === fetchTracksMode.Favorites) {
-          this.store.dispatch(deleteItem(track.id))
+    private get query(): TracksQuery {
+        return {
+            mode: this.mode,
+            artistId: this.artistId ?? undefined,
+            albumId: this.albumId ?? undefined,
         }
-      }
-    })
-  }
+    }
 
-  render() {
-    return this.getErrorMessage() || html`
+    private get queryKey(): string {
+        return getTracksKey(this.query)
+    }
+
+    connectedCallback() {
+        super.connectedCallback()
+        if (this.storeState.tracks.currentKey !== this.queryKey) {
+            this._loadItems()
+        }
+    }
+
+    // store state changed
+    stateChanged(state: RootState): void {
+        super.stateChanged(state)
+        this._items = state.tracks.items
+        this._hasNext = state.tracks.hasNext
+    }
+
+    _loadItems() {
+        this._isLoading = true
+        this.store.dispatch(setCurrentTracksKey(this.queryKey))
+        this.store.dispatch(setProgressIndeterminate(true))
+        store.dispatch(fetchTracks(this.query, this.limit, this._page)).then(() => {
+            this._isLoading = false
+            this.store.dispatch(setProgressIndeterminate(false))
+        })
+    }
+
+    _loadMore() {
+        if (!this._page) {
+            this._page = 1
+        }
+        this._page++
+        this._loadItems()
+    }
+
+    _viewLyrics(track: Track) {
+        this._selectedItem = { ...track }
+        const dialog: any = this.viewLyricsDialogRef.value!
+        dialog.open = true
+    }
+
+    viewLyricsDialogRef: Ref<HTMLInputElement> = createRef()
+
+    private _delDialogHide() {
+        this._selectedItem = null
+        this.store.dispatch(setTrackItem(null))
+    }
+
+    _toggleLike(track: Track) {
+        this._isLoading = true
+        this.store.dispatch(setProgressIndeterminate(true))
+        let val = !track.like
+        store.dispatch(updateTrack(<number>track.id, <updateTrackParams>{
+            like: val
+        })).then(() => {
+            this._isLoading = false
+            this.store.dispatch(setProgressIndeterminate(false))
+            if (val) {
+                notify('Added to favorites', 'success')
+            } else {
+                notify('Removed from favorites', 'success')
+                if (this.mode === fetchTracksMode.Favorites) {
+                    this.store.dispatch(deleteItem(track.id))
+                }
+            }
+        })
+    }
+
+    private get _showArtist(): boolean {
+        return [...new Set(this._items.map((track: Track) => track.artist))].length > 1
+    }
+
+    private _convertTrack(trackId: number) {
+        this.store.dispatch(setProgressIndeterminate(true))
+        store.dispatch(convertTrack(trackId, <ConvertTrackParams>{
+            format: 'mp3',
+            mode: 'cbr',
+            quality: '320',
+        })).then(() => {
+            this.store.dispatch(setProgressIndeterminate(false))
+        })
+    }
+
+    render() {
+        return this.getErrorMessage() || html`
 <div>
   ${this._items.length > 0 ? html`
   <div class="wa-cluster wa-justify-content-end">
@@ -145,9 +160,9 @@ export class TracksList extends SonaryLitElement {
   <ol class="wa-stack wa-gap-0">
     ${repeat(this._items, (item: Track) => item.id, (item: Track, index: number) => html`
     <li class="${classMap({
-      'wa-grid': this.albumId === null,
-      'wa-cluster wa-justify-content-space-between': this.albumId !== null,
-    })}" data-key="${index}">
+            'wa-grid': this.albumId === null,
+            'wa-cluster wa-justify-content-space-between': this.albumId !== null,
+        })}" data-key="${index}">
       ${this.albumId ? html`
       <span class="wa-cluster">
         <span class="wa-flank">
@@ -172,13 +187,18 @@ export class TracksList extends SonaryLitElement {
       </span>
       `}
       <span class="wa-cluster wa-justify-content-end">
-        ${item.lyrics &&
-      html`<span>
+        ${this.albumId && this._showArtist ? html`
+        <span class="wa-flank">
+          <span>${item.artist}</span>
+        </span>
+        ` : ''}
+        ${item.lyrics ?
+                html`<span>
           <wa-button id="show-lyrics-${item.id}" appearance="plain" slot="trigger" size="s" variant="neutral" @click="${() => this._viewLyrics(item)}" aria-labelledby="wa-tooltip-lyrics-${item.id}">
             <wa-icon name="music-note-list" label="Lyrics" role="img" aria-label="Lyrics" library="default" rotate="0" style="--rotate-angle: 0deg;"></wa-icon>
           </wa-button>
           <wa-tooltip for="show-lyrics-${item.id}" placement="bottom" without-arrow id="wa-tooltip-lyrics-${item.id}">Lyrics</wa-tooltip>
-        </span>`}
+        </span>` : html`<span><wa-button size="s" style="visibility: hidden;"><wa-icon name="music-note-list" library="default"></wa-icon></wa-button></span>`}
         ${this.albumId ? '' : html`
         <span>${item.year === 0 ? '' : item.year}</span>
         <span>${item.type}</span>
@@ -194,9 +214,9 @@ export class TracksList extends SonaryLitElement {
           <wa-button appearance="plain" slot="trigger" size="s" variant="neutral">
             <wa-icon name="ellipsis" label="Track Options" role="img" aria-label="Track Options" library="default" rotate="0" style="--rotate-angle: 0deg;"></wa-icon>
           </wa-button>
-          <wa-dropdown-item value="convert">Convert</wa-dropdown-item>
+          <wa-dropdown-item value="convert" @click="${() => this._convertTrack(item.id)}">Convert</wa-dropdown-item>
           ${item.lyrics &&
-      html`<wa-dropdown-item value="lyrics" @click="${() => this._viewLyrics(item)}">View lyrics</wa-dropdown-item>`}
+            html`<wa-dropdown-item value="lyrics" @click="${() => this._viewLyrics(item)}">View lyrics</wa-dropdown-item>`}
         </wa-dropdown>
       </span>
     </li>
@@ -213,11 +233,11 @@ export class TracksList extends SonaryLitElement {
 
 </div>
 `
-  }
+    }
 }
 
 declare global {
-  interface HTMLElementTagNameMap {
-    'sonary-tracks-list': TracksList
-  }
+    interface HTMLElementTagNameMap {
+        'sonary-tracks-list': TracksList
+    }
 }
