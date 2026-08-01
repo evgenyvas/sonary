@@ -31,12 +31,24 @@ export interface Track {
     like: boolean,
 }
 
-export const EventProgressUpdate = "PROGRESS_UPDATE"
+export interface TrackConvert {
+    id: number,
+    title: string,
+}
+
+export const EventImportProgressUpdate = "IMPORT_PROGRESS_UPDATE"
+export const EventConvertProgressUpdate = "CONVERT_PROGRESS_UPDATE"
+export const EventConvertTrackProgressUpdate = "CONVERT_TRACK_PROGRESS_UPDATE"
+
+export const ConvertStatusProcessing = "PROCESSING"
+export const ConvertStatusCompleted = "COMPLETED"
+export const ConvertStatusFailed = "FAILED"
+
 export const EventError = "ERROR"
 export const EventFinished = "FINISHED"
 
 type EventMap = {
-    EventProgressUpdate: {
+    EventImportProgressUpdate: {
         progress: number
     }
 
@@ -57,7 +69,10 @@ export type EventMsg = {
 }[keyof EventMap]
 
 export interface ConvertTrackParams {
+    userId: string,
+    track_ids: number[],
     format: string,
     mode: string,
     quality: string,
+    include_pregap: boolean,
 }

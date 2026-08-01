@@ -7,12 +7,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
+	"os"
+	"slices"
 	"sonary/internal/database"
+	"sonary/internal/ffmpeg"
 	"sonary/internal/lib"
 	"sonary/internal/track"
 	"sonary/internal/websocket"
 	"sonary/utils"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -27,10 +32,13 @@ const (
 const (
 	TaskSyncDirectories     = "sync_directories"
 	TaskScanDirectoryTracks = "scan_directory_tracks"
+	TaskConvertTracks       = "convert_tracks"
+	TaskConvertTrack        = "convert_track"
 )
 
 type Job struct {
 	ID           int
+	ParentID     sql.NullInt64
 	TaskType     string
 	Payload      json.RawMessage
 	Status       string
@@ -42,24 +50,44 @@ type Job struct {
 
 type JobFilter struct {
 	ID       *int
+	ParentID *int
 	TaskType *string
 	Payload  *string
-	Status   *[]string
+	Status   []string
 }
 
 type JobPath struct {
 	Path string `json:"path"`
 }
 
+type JobConvertParams struct {
+	Format        string `json:"format"`
+	Mode          string `json:"mode"`
+	Quality       string `json:"quality"`
+	IncludePregap bool   `json:"pregap"`
+}
+
+type JobConvertTracks struct {
+	UserID   string `json:"user_id"`
+	TracksID []int  `json:"tracks"`
+	JobConvertParams
+}
+
+type JobConvertTrack struct {
+	UserID  string `json:"user_id"`
+	TrackID int    `json:"track"`
+	JobConvertParams
+}
+
 // Enqueue inserts a new background task
-func Enqueue(db *sql.DB, taskType string, payload any) (int64, error) {
+func Enqueue(db *sql.DB, parentID sql.NullInt64, taskType string, payload any) (int64, error) {
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return 0, err
 	}
 
-	query := `INSERT INTO jobs (task_type, payload, status) VALUES (?, ?, ?)`
-	res, err := db.Exec(query, taskType, string(payloadBytes), StatusPending)
+	query := `INSERT INTO jobs (parent_id, task_type, payload, status) VALUES (?, ?, ?, ?)`
+	res, err := db.Exec(query, parentID, taskType, string(payloadBytes), StatusPending)
 	if err != nil {
 		return 0, err
 	}
@@ -69,8 +97,17 @@ func Enqueue(db *sql.DB, taskType string, payload any) (int64, error) {
 
 // Get trying to find recent job
 func Get(db *sql.DB, filter JobFilter) (*Job, error) {
+	jobs, err := GetJobs(db, filter, true)
+	if err != nil {
+		return nil, err
+	}
+	return &jobs[0], nil
+}
+
+// Get trying to find recent job
+func GetJobs(db *sql.DB, filter JobFilter, isSingle bool) ([]Job, error) {
 	query := `
-		SELECT id, task_type, payload, status, result,
+		SELECT id, parent_id, task_type, payload, status, result,
 			error_message, created_at, updated_at
 		FROM jobs
 	`
@@ -85,6 +122,11 @@ func Get(db *sql.DB, filter JobFilter) (*Job, error) {
 		conditions = append(conditions, "id = ?")
 		args = append(args, *filter.ID)
 	} else {
+		if filter.ParentID != nil {
+			conditions = append(conditions, "parent_id = ?")
+			args = append(args, *filter.ParentID)
+		}
+
 		if filter.TaskType != nil {
 			conditions = append(conditions, "task_type = ?")
 			args = append(args, *filter.TaskType)
@@ -95,14 +137,14 @@ func Get(db *sql.DB, filter JobFilter) (*Job, error) {
 			args = append(args, *filter.Payload)
 		}
 
-		if filter.Status != nil && len(*filter.Status) > 0 {
+		if len(filter.Status) > 0 {
 			// Build a slice of '?' characters matching the length of slice
-			placeholders := make([]string, len(*filter.Status))
+			placeholders := make([]string, len(filter.Status))
 			for i := range placeholders {
 				placeholders[i] = "?"
 			}
 			conditions = append(conditions, "status IN ("+strings.Join(placeholders, ", ")+")")
-			for _, v := range *filter.Status {
+			for _, v := range filter.Status {
 				args = append(args, v)
 			}
 		}
@@ -114,34 +156,53 @@ func Get(db *sql.DB, filter JobFilter) (*Job, error) {
 		return nil, nil
 	}
 
-	query += " ORDER BY created_at ASC LIMIT 1"
-
-	var job Job
-	var payloadStr string
-	var resultStr sql.NullString
-
-	err := db.QueryRow(query, args...).Scan(
-		&job.ID,
-		&job.TaskType,
-		&payloadStr,
-		&job.Status,
-		&resultStr,
-		&job.ErrorMessage,
-		&job.CreatedAt,
-		&job.UpdatedAt,
-	)
-	job.Payload = json.RawMessage(payloadStr)
-	if resultStr.Valid {
-		job.Result = json.RawMessage(resultStr.String)
+	query += " ORDER BY created_at ASC"
+	if isSingle {
+		query += " LIMIT 1"
 	}
+
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
 	}
+	defer rows.Close()
 
-	return &job, nil
+	var jobs []Job
+
+	for rows.Next() {
+		var parentID sql.NullInt64
+		var payloadStr string
+		var resultStr sql.NullString
+
+		var job Job
+		err := rows.Scan(
+			&job.ID,
+			&parentID,
+			&job.TaskType,
+			&payloadStr,
+			&job.Status,
+			&resultStr,
+			&job.ErrorMessage,
+			&job.CreatedAt,
+			&job.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if parentID.Valid {
+			job.ParentID = parentID
+		}
+		job.Payload = json.RawMessage(payloadStr)
+		if resultStr.Valid {
+			job.Result = json.RawMessage(resultStr.String)
+		}
+		jobs = append(jobs, job)
+	}
+
+	return jobs, nil
 }
 
 // GetNext fetches and safely locks a job using an Immediate Transaction block
@@ -161,14 +222,14 @@ func GetNext(db *sql.DB) (*Job, error) {
 	var payloadStr string
 
 	query := `
-		SELECT id, task_type, payload, status
+		SELECT id, parent_id, task_type, payload, status
 		FROM jobs
 		WHERE status = ?
 		ORDER BY created_at ASC
 		LIMIT 1
 	`
 
-	err = tx.QueryRow(query, StatusPending).Scan(&job.ID, &job.TaskType, &payloadStr, &job.Status)
+	err = tx.QueryRow(query, StatusPending).Scan(&job.ID, &job.ParentID, &job.TaskType, &payloadStr, &job.Status)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil // No jobs available right now
 	}
@@ -249,7 +310,7 @@ func StartWorkerPool(ctx context.Context, db *sql.DB, workerCount int) {
 
 					log.Printf("[Worker %d] Picked up job %d (%s)", workerID, job.ID, job.TaskType)
 
-					result, err := processTask(db, job)
+					result, err := processTask(db, job, workerID)
 					if err != nil {
 						if errors.Is(err, ErrTaskWait) {
 							log.Printf("[Worker %d] Job %d is waiting for other task: %v", workerID, job.ID, err)
@@ -257,6 +318,8 @@ func StartWorkerPool(ctx context.Context, db *sql.DB, workerCount int) {
 							if err := UpdateStatus(db, job.ID, StatusPending, nil, ""); err != nil {
 								log.Printf("UpdateStatus error: %v", err)
 							}
+						} else if errors.Is(err, ErrTaskWaitChildren) {
+							// do nothing
 						} else {
 							log.Printf("[Worker %d] Job %d Failed: %v", workerID, job.ID, err)
 							if err := UpdateStatus(db, job.ID, StatusFailed, nil, err.Error()); err != nil {
@@ -269,6 +332,30 @@ func StartWorkerPool(ctx context.Context, db *sql.DB, workerCount int) {
 							log.Printf("UpdateStatus error: %v", err)
 						}
 					}
+					if job.TaskType == TaskConvertTrack {
+						// check if all convert tasks completed
+						trackJobs, err := GetJobs(db, JobFilter{
+							ParentID: utils.Ptr(int(job.ParentID.Int64)),
+							TaskType: utils.Ptr(TaskConvertTrack),
+						}, false)
+						if err != nil {
+							log.Printf("[Worker %d] Job %v get job list error: %v", workerID, job.ID, err)
+							continue
+						}
+						trackJobsCompeted := make([]Job, 0, len(trackJobs))
+						for _, j := range trackJobs {
+							if j.Status == StatusCompleted {
+								trackJobsCompeted = append(trackJobsCompeted, j)
+							}
+						}
+						if len(trackJobs) == len(trackJobsCompeted) {
+							// parent job is completed
+							log.Printf("[Worker %d] Job %d Completed", workerID, job.ParentID.Int64)
+							if err := UpdateStatus(db, int(job.ParentID.Int64), StatusCompleted, nil, ""); err != nil {
+								log.Printf("UpdateStatus error: %v", err)
+							}
+						}
+					}
 				}
 			}
 		}(i)
@@ -276,17 +363,16 @@ func StartWorkerPool(ctx context.Context, db *sql.DB, workerCount int) {
 }
 
 var ErrTaskWait = errors.New("job wait for other task")
+var ErrTaskWaitChildren = errors.New("task is waiting for children to execute")
 
-var Broadcast = make(chan []byte) // Broadcast channel
-
-func processTask(db *sql.DB, job *Job) (any, error) {
+func processTask(db *sql.DB, job *Job, workerID int) (any, error) {
 	if job.TaskType == TaskSyncDirectories {
 		res, err := track.SyncDirectories()
 		if err != nil {
 			log.Printf("[Job %v] Sync directories error: %v", job.ID, err)
 			return nil, err
 		}
-		log.Printf("[Job %v] Sync directories result: %v", res)
+		log.Printf("[Job %v] Sync directories result: %v", job.ID, res)
 
 		dirs, err := database.GetDirectories(db)
 		if err != nil {
@@ -301,7 +387,8 @@ func processTask(db *sql.DB, job *Job) (any, error) {
 			}
 
 			// create scan job for each directory
-			_, err := Enqueue(db, TaskScanDirectoryTracks, JobPath{Path: dir.Path})
+			_, err := Enqueue(db, sql.NullInt64{Int64: int64(job.ID), Valid: true},
+				TaskScanDirectoryTracks, JobPath{Path: dir.Path})
 			if err != nil {
 				log.Printf("[Job %v] Add job error: %v", job.ID, err)
 				return nil, err
@@ -309,28 +396,30 @@ func processTask(db *sql.DB, job *Job) (any, error) {
 			total++
 		}
 
-		ct := lib.GetImportContext(true)
+		lib.ResetImportContext()
+		ct := lib.GetImportContext()
 		ct.Progress.Total = total
 
 		return res, nil
 	} else if job.TaskType == TaskScanDirectoryTracks {
 		// directory scanning job must be completed
-		jobDirScan, err := Get(db, JobFilter{
-			TaskType: utils.Ptr(TaskSyncDirectories),
-			Status:   utils.Ptr([]string{StatusPending, StatusRunning}),
-		})
+		if !job.ParentID.Valid {
+			return nil, ErrTaskWait
+		}
+		jobDirScan, err := Get(db, JobFilter{ID: utils.Ptr(int(job.ParentID.Int64))})
 		if err != nil {
 			log.Printf("[Job %v] Get job error: %v", job.ID, err)
 			return nil, err
 		}
-		if jobDirScan != nil {
+		if jobDirScan != nil && jobDirScan.TaskType == TaskSyncDirectories &&
+			slices.Contains([]string{StatusPending, StatusRunning}, jobDirScan.Status) {
 			return nil, ErrTaskWait
 		}
 
-		ct := lib.GetImportContext(false)
+		ct := lib.GetImportContext()
 
-		var dirScanPayload JobPath
-		err = json.Unmarshal(job.Payload, &dirScanPayload)
+		var jobPayload JobPath
+		err = json.Unmarshal(job.Payload, &jobPayload)
 		if err != nil {
 			log.Printf("[Job %v] JSON unmarshal error: %v", job.ID, err)
 			return nil, err
@@ -345,18 +434,143 @@ func processTask(db *sql.DB, job *Job) (any, error) {
 
 			if newPercent > oldPercent {
 				hub := websocket.GetHub()
-				hub.Broadcast <- websocket.ProgressEvent{
-					Type:     lib.EventProgressUpdate,
+				hub.Send <- websocket.ProgressEvent{
+					Type:     lib.EventImportProgressUpdate,
 					Progress: newPercent,
 				}
 			}
 		}()
 
-		err = track.ScanTracksInDir(dirScanPayload.Path)
+		err = track.ScanTracksInDir(jobPayload.Path)
 		if err != nil {
 			log.Printf("[Job %v] Scan directory tracks error: %v", job.ID, err)
 			return nil, err
 		}
+
+		return nil, nil
+	} else if job.TaskType == TaskConvertTracks {
+		var jobPayload JobConvertTracks
+		if err := json.Unmarshal(job.Payload, &jobPayload); err != nil {
+			log.Printf("[Job %v] JSON unmarshal error: %v", job.ID, err)
+			return nil, err
+		}
+
+		total := len(jobPayload.TracksID)
+		if total == 0 {
+			return "No tracks to convert", nil
+		}
+
+		for _, trackID := range jobPayload.TracksID {
+			// create scan job for each track
+			_, err := Enqueue(db, sql.NullInt64{Int64: int64(job.ID), Valid: true},
+				TaskConvertTrack, JobConvertTrack{
+					UserID:  jobPayload.UserID,
+					TrackID: trackID,
+					JobConvertParams: JobConvertParams{
+						Format:        jobPayload.Format,
+						Mode:          jobPayload.Mode,
+						Quality:       jobPayload.Quality,
+						IncludePregap: jobPayload.IncludePregap,
+					},
+				})
+			if err != nil {
+				log.Printf("[Job %v] Add job error: %v", job.ID, err)
+				return nil, err
+			}
+		}
+
+		lib.ResetConvertProgress()
+		ct := lib.GetConvertContext()
+		ct.Progress.Total = total
+
+		return nil, ErrTaskWaitChildren
+	} else if job.TaskType == TaskConvertTrack {
+		var jobPayload JobConvertTrack
+		err := json.Unmarshal(job.Payload, &jobPayload)
+		if err != nil {
+			log.Printf("[Job %v] JSON unmarshal error: %v", job.ID, err)
+			return nil, err
+		}
+
+		readDB := database.Reader()
+		track, err := database.GetTrack(readDB, jobPayload.TrackID)
+		if err != nil {
+			log.Printf("[Job %v] Load track error: %v", job.ID, err)
+			return nil, err
+		}
+
+		// check if audio file exists (cannot use Open, because ffmpeg can open too)
+		if _, err := os.Stat(track.Path); os.IsNotExist(err) {
+			log.Printf("[Job %v] Source file not found: %v", job.ID, err)
+			return nil, err
+		}
+
+		ct := lib.GetConvertContext()
+
+		defer func() {
+			newProcessed := int(ct.Progress.Processed.Add(1))
+			hub := websocket.GetHub()
+			hub.Send <- websocket.ProgressConvertEvent{
+				BaseEvent: websocket.BaseEvent{UserID: jobPayload.UserID},
+				Type:      lib.EventConvertProgressUpdate,
+				Total:     ct.Progress.Total,
+				Processed: newProcessed,
+				Progress:  utils.GetPercent(newProcessed, ct.Progress.Total),
+			}
+		}()
+
+		var tmpPath string
+		if track.FileType == "MP3" && jobPayload.Format == "mp3" {
+			tmpFile, err := os.CreateTemp("", "track_"+strconv.Itoa(track.ID)+"_direct_*.mp3")
+			if err != nil {
+				log.Printf("[Job %v] Failed to create temp file: %v", job.ID, err)
+				return nil, err
+			}
+			tmpPath = tmpFile.Name()
+
+			srcFile, err := os.Open(track.Path)
+			if err != nil {
+				tmpFile.Close()
+				os.Remove(tmpPath)
+				log.Printf("[Job %v] Failed to open source file: %v", job.ID, err)
+				return nil, err
+			}
+
+			_, err = io.Copy(tmpFile, srcFile)
+			srcFile.Close()
+			tmpFile.Close()
+
+			if err != nil {
+				os.Remove(tmpPath)
+				log.Printf("[Job %v] Direct copy failed: %v", job.ID, err)
+				return nil, err
+			}
+
+			hub := websocket.GetHub()
+			hub.Send <- websocket.ProgressTrackConvertEvent{
+				BaseEvent:  websocket.BaseEvent{UserID: jobPayload.UserID},
+				Type:       lib.EventConvertTrackProgressUpdate,
+				Progress:   100,
+				Status:     websocket.ConvertStatusCompleted,
+				TrackID:    track.ID,
+				TrackTitle: track.Title,
+			}
+
+			log.Printf("[Job %v] Track is already MP3. Copied directly without FFmpeg.", job.ID)
+		} else {
+			ff := ffmpeg.NewFFmpeg()
+			tmpPath, err = ff.ConvertFile(track, lib.ConvertParams{
+				Format:        jobPayload.Format,
+				Mode:          jobPayload.Mode,
+				Quality:       jobPayload.Quality,
+				IncludePregap: jobPayload.IncludePregap,
+			}, jobPayload.UserID)
+			if err != nil {
+				log.Printf("[Job %v] Conversion method failed: %v", job.ID, err)
+			}
+		}
+
+		ct.Jobs.Store(job.ID, tmpPath)
 
 		return nil, nil
 	}

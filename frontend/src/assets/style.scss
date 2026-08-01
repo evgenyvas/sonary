@@ -187,3 +187,20 @@ main {
     block-size: 100%;
   }
 }
+#callout-toast-container,
+#callout-toast-container:popover-open {
+  position: fixed; 
+  inset: unset !important; 
+  bottom: 20px !important; 
+  right: 20px !important; 
+  display: flex; 
+  flex-direction: column; 
+  gap: 10px; 
+  max-width: 350px; 
+  width: 100%;
+  border: none !important; 
+  background: transparent !important; 
+  margin: 0 !important; 
+  padding: 0 !important; 
+  overflow: visible !important;
+}

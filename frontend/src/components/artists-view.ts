@@ -1,8 +1,9 @@
 import SonaryLitElement from '@/base'
 import { html } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
-import store, { fetchArtist, setProgressIndeterminate, fetchTracksMode } from '@/store'
+import store, { type RootState, fetchArtist, setProgressIndeterminate, fetchTracksMode } from '@/store'
 import type { Artist } from '@/types'
+import { classMap } from 'lit/directives/class-map.js'
 import '@/components/albums-list'
 import '@/components/tracks-list'
 
@@ -20,6 +21,12 @@ export class ArtistsView extends SonaryLitElement {
     @property({ type: String, attribute: 'base-route' })
     baseRoute: string = '/'
 
+    @state()
+    private _hasAlbums = false
+
+    @state()
+    private _hasTracks = false
+
     connectedCallback() {
         super.connectedCallback()
 
@@ -32,16 +39,36 @@ export class ArtistsView extends SonaryLitElement {
         })
     }
 
+    // store state changed
+    stateChanged(state: RootState): void {
+        super.stateChanged(state)
+    }
+
+    willUpdate(changedProperties: Map<string, any>) {
+        if (changedProperties.has('artistId')) {
+            this._hasAlbums = false
+            this._hasTracks = false
+        }
+    }
+
     render() {
         return this.getErrorMessage() || this._isLoading ? '' : html`
 <div>
   <div class="wa-cluster"><br></div>
   <h1 class="wa-heading-4xl">${this._selectedItem?.name}</h1>
-  <b>Albums</b>
-  <sonary-albums-list .baseRoute="${this.baseRoute}" .artistId=${this.artistId} limit="0"></sonary-albums-list>
+  <div class="${classMap({ 'wa-visually-hidden': !this._hasAlbums })}">
+    <b>Albums</b>
+    <sonary-albums-list .baseRoute="${this.baseRoute}" .artistId=${this.artistId} limit="0"
+        @albums-empty="${() => this._hasAlbums = false}"
+        @albums-loaded="${() => this._hasAlbums = true}"></sonary-albums-list>
+  </div>
   <div class="wa-cluster"><br></div>
-  <b>Tracks</b>
-  <sonary-tracks-list .baseRoute="${this.baseRoute}" .mode=${fetchTracksMode.NoAlbum} .artistId=${this.artistId} limit="0"></sonary-tracks-list>
+  <div class="${classMap({ 'wa-visually-hidden': !this._hasTracks })}">
+    <b>Tracks</b>
+    <sonary-tracks-list .baseRoute="${this.baseRoute}" .mode=${fetchTracksMode.NoAlbum} .artistId=${this.artistId} limit="0"
+        @tracks-empty="${() => this._hasTracks = false}"
+        @tracks-loaded="${() => this._hasTracks = true}"></sonary-tracks-list>
+  </div>
 </div>
 `
     }

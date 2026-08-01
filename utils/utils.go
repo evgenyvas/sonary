@@ -90,3 +90,25 @@ func QueryInt(q url.Values, key string) (int, error) {
 func QueryStrings(q url.Values, key string) []string {
 	return q[key]
 }
+
+func SanitizeFilename(name string) string {
+	// slashes
+	name = strings.ReplaceAll(name, "/", " - ")
+	name = strings.ReplaceAll(name, "\\", " - ")
+
+	// colon
+	name = strings.ReplaceAll(name, ":", " - ")
+
+	// other symbols
+	badChars := []string{"*", "?", "\"", "<", ">", "|"}
+	for _, char := range badChars {
+		name = strings.ReplaceAll(name, char, "")
+	}
+
+	// spaces
+	for strings.Contains(name, "  ") {
+		name = strings.ReplaceAll(name, "  ", " ")
+	}
+
+	return strings.TrimSpace(name)
+}

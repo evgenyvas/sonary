@@ -2,6 +2,7 @@ import { legacy_createStore as createStore, combineReducers, applyMiddleware } f
 import { thunk } from 'redux-thunk'
 import type { Track, Artist, Album, ConvertTrackParams } from '@/types'
 import httpClient, { flatten } from '@/utils/request'
+import { getUserId } from '@/modules/websocket/websocket'
 
 export interface TracksQuery {
     mode: fetchTracksMode
@@ -437,12 +438,71 @@ export const fetchAlbum = (albumId: number): any => {
     }
 }
 
-export const convertTrack = (trackId: number, params: ConvertTrackParams): any => {
+var getFilename = (filename: string, contentDisposition: string): string => {
+    // Search for filename="name.ext" or filename=name.ext
+    const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;\n]*)/i)
+    if (utf8Match && utf8Match[1]) {
+        filename = decodeURIComponent(utf8Match[1]) // Декодируем %XX обратно в нормальный текст
+    } else {
+        const filenameMatch = contentDisposition.match(/filename="([^"]+)"/i)
+        if (filenameMatch && filenameMatch[1]) {
+            filename = filenameMatch[1].replace(/['"]/g, '')
+        }
+    }
+    return filename
+}
+
+export const convertTrack = (trackIds: number[], params: ConvertTrackParams): any => {
     return async () => {
+        params.track_ids = trackIds
         try {
-            const response = await httpClient.raw<Blob, 'blob'>('/v1/tracks/' + trackId + '/convert', {
+            const response = await httpClient.raw<Blob, 'blob'>('/v1/convert/start', {
                 method: 'POST',
                 body: params,
+                responseType: 'blob'
+            })
+            const blob = response._data
+
+            if (!blob) throw new Error('Response data is empty')
+
+            const contentType = response.headers.get('Content-Type')
+
+            if (contentType && contentType.includes('audio/mpeg')) {
+                const contentDisposition = response.headers.get('Content-Disposition')
+                let filename = 'track.mp3'
+
+                if (contentDisposition) {
+                    filename = getFilename(filename, contentDisposition)
+                }
+
+                const url = window.URL.createObjectURL(blob)
+                const link = document.createElement('a')
+                link.href = url
+                link.setAttribute('download', filename)
+                document.body.appendChild(link)
+                link.click()
+                link.remove()
+                window.URL.revokeObjectURL(url)
+
+                return { directDownload: true }
+            }
+
+            const text = await blob.text()
+            const jsonResult = JSON.parse(text)
+
+            return { directDownload: false, job_id: jsonResult.job_id }
+        } catch (error) {
+            console.error('Error during convert start:', error)
+            throw error
+        }
+    }
+}
+
+export const downloadConvert = (jobId: number): any => {
+    return async () => {
+        try {
+            const response = await httpClient.raw<Blob, 'blob'>('/v1/convert/download/' + jobId, {
+                method: 'POST',
                 responseType: 'blob'
             })
 
@@ -452,16 +512,11 @@ export const convertTrack = (trackId: number, params: ConvertTrackParams): any =
             // get filename from response header
             const contentDisposition = response.headers.get('Content-Disposition')
 
-            // default name
-            let filename = 'song.' + params.format
-
+            let filename = ''
             if (contentDisposition) {
-                // Search for filename="name.ext" or filename=name.ext
-                const filenameMatch = contentDisposition.match(/filename="([^"]+)"/i)
-                if (filenameMatch && filenameMatch[1]) {
-                    filename = filenameMatch[1].replace(/['"]/g, '')
-                }
+                filename = getFilename(filename, contentDisposition)
             }
+            if (!filename) throw new Error('File name cannot be determined')
 
             // start download
             const url = window.URL.createObjectURL(blob)
@@ -474,9 +529,8 @@ export const convertTrack = (trackId: number, params: ConvertTrackParams): any =
 
             link.remove()
             window.URL.revokeObjectURL(url)
-
         } catch (error) {
-            console.error('Ошибка при скачивании трека:', error)
+            console.error('Error while downloading convert result:', error)
         }
     }
 }

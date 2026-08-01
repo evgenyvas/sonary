@@ -75,13 +75,16 @@ func initDatabase(db DBTX) {
 			_, err = db.Exec(`
 				CREATE TABLE IF NOT EXISTS jobs (
 				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				parent_id INTEGER,             -- Parent Job
 				task_type TEXT NOT NULL,
 				payload TEXT NOT NULL,         -- Stored as JSON string
 				status TEXT DEFAULT 'pending', -- pending, running, completed, failed
 				result TEXT,                   -- Stored as JSON string
 				error_message TEXT,
 				created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-				updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+				updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+				FOREIGN KEY (parent_id)
+				REFERENCES jobs(id)
 				);
 
 				CREATE TABLE artists (

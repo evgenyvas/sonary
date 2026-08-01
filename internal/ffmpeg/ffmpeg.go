@@ -2,12 +2,14 @@
 package ffmpeg
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"os/exec"
 	"sonary/internal/lib"
+	"sonary/internal/websocket"
 	"strconv"
 	"strings"
 	"time"
@@ -65,16 +67,21 @@ func (f *FFmpeg) Duration(path string) (time.Duration, error) {
 	return time.Duration(seconds * float64(time.Second)), nil
 }
 
-func (f *FFmpeg) ConvertTrackStream(track *lib.TrackDB, outputStream io.Writer,
-	params lib.ConvertParams) error {
-
+func (f *FFmpeg) getTrackConvertArgs(track *lib.TrackDB, params lib.ConvertParams) ([]string, error) {
 	args := []string{"-i", track.Path, "-vn"}
 
 	// for CUE calculate offset
 	if track.IsCue {
-		startSec := track.CueOffset.Seconds()
-		durationSec := track.Duration.Seconds()
-		args = append(args, "-ss", fmt.Sprintf("%.3f", startSec), "-t", fmt.Sprintf("%.3f", durationSec))
+		start := track.CueOffset
+		duration := track.Duration
+
+		// add pregap if user wants
+		if params.IncludePregap && track.HasPregap {
+			start = track.CueOffset - track.PregapDuration
+			duration = track.Duration + track.PregapDuration
+		}
+
+		args = append(args, "-ss", fmt.Sprintf("%.3f", start.Seconds()), "-t", fmt.Sprintf("%.3f", duration.Seconds()))
 	}
 
 	args = append(args, "-acodec", "libmp3lame")
@@ -95,7 +102,7 @@ func (f *FFmpeg) ConvertTrackStream(track *lib.TrackDB, outputStream io.Writer,
 		}
 		args = append(args, "-b:a", rate)
 	default:
-		return fmt.Errorf("unsupported convert mode: %s", params.Mode)
+		return nil, fmt.Errorf("unsupported convert mode: %s", params.Mode)
 	}
 
 	// clean original metadata to avoid conflicts
@@ -122,10 +129,19 @@ func (f *FFmpeg) ConvertTrackStream(track *lib.TrackDB, outputStream io.Writer,
 	if track.Genre != "" {
 		args = append(args, "-metadata", "genre="+track.Genre)
 	}
+	return args, nil
+}
+
+func (f *FFmpeg) ConvertTrackStream(track *lib.TrackDB, params lib.ConvertParams,
+	outputStream io.Writer) error {
+
+	args, err := f.getTrackConvertArgs(track, params)
+	if err != nil {
+		return err
+	}
 
 	// Finalize arguments to output to stdout pipe
 	args = append(args, "-f", params.Format, "pipe:1")
-	fmt.Printf("%s", args)
 
 	// Initialize and pipe the command
 	cmd := exec.Command("ffmpeg", args...)
@@ -149,19 +165,115 @@ func (f *FFmpeg) ConvertTrackStream(track *lib.TrackDB, outputStream io.Writer,
 	return nil
 }
 
-func (f *FFmpeg) ConvertTrackToFile(track *lib.TrackDB, tmpOutputPath string,
-	params lib.ConvertParams) error {
+func sendConvertProgress(userID string, progress int, status string, track *lib.TrackDB) {
+	hub := websocket.GetHub()
+	hub.Send <- websocket.ProgressTrackConvertEvent{
+		BaseEvent:  websocket.BaseEvent{UserID: userID},
+		Type:       lib.EventConvertTrackProgressUpdate,
+		Progress:   progress,
+		Status:     status,
+		TrackID:    track.ID,
+		TrackTitle: track.Title,
+	}
+}
 
-	args := []string{"-i", track.Path, "-vn"}
+func sendConvertError(userID string, err error, track *lib.TrackDB) {
+	hub := websocket.GetHub()
+	hub.Send <- websocket.MessageEvent{
+		BaseEvent: websocket.BaseEvent{UserID: userID},
+		Variant:   websocket.MessageVariantError,
+		Message:   err.Error(),
+	}
 
-	/////////////
-	/////////////
+	hub.Send <- websocket.ProgressTrackConvertEvent{
+		BaseEvent:  websocket.BaseEvent{UserID: userID},
+		Type:       lib.EventConvertTrackProgressUpdate,
+		Status:     websocket.ConvertStatusFailed,
+		TrackID:    track.ID,
+		TrackTitle: track.Title,
+	}
+}
 
-	// write the result to disk in the prepared tmpOutputPath
-	args = append(args, "-y", tmpOutputPath)
+func (f *FFmpeg) ConvertFile(track *lib.TrackDB,
+	params lib.ConvertParams,
+	targetUserID string) (string, error) {
+
+	st := params.ToString()
+
+	// create temporary file
+	tmpFile, err := os.CreateTemp("", "track_"+strconv.Itoa(track.ID)+"_"+st+"_*.mp3")
+	if err != nil {
+		sendConvertError(targetUserID, err, track)
+		return "", fmt.Errorf("failed to create temporary file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()
+
+	args, err := f.getTrackConvertArgs(track, params)
+	if err != nil {
+		return "", err
+	}
+
+	// ask FFmpeg to output technical progress logging to stderr
+	args = append(args, "-progress", "pipe:2", "-y", tmpPath)
 
 	cmd := exec.Command("ffmpeg", args...)
-	cmd.Stderr = os.Stderr // execution logs still go to the server console
 
-	return cmd.Run()
+	// intercept Stderr to read logs line by line
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		sendConvertError(targetUserID, err, track)
+		return "", fmt.Errorf("failed to get Stderr pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		sendConvertError(targetUserID, err, track)
+		return "", fmt.Errorf("failed to start ffmpeg: %w", err)
+	}
+
+	// track duration
+	totalDuration := track.Duration
+	// add pregap if user wants
+	if params.IncludePregap && track.HasPregap {
+		totalDuration = track.Duration + track.PregapDuration
+	}
+
+	// read FFmpeg output
+	go func() {
+		scanner := bufio.NewScanner(stderrPipe)
+
+		for scanner.Scan() {
+			line := scanner.Text()
+
+			// FFmpeg sends strings like "out_time_us=45000000" (microseconds)
+			if strings.HasPrefix(line, "out_time_us=") {
+				timeUs, _ := strconv.ParseFloat(line[12:], 64)
+				currentSec := timeUs / 1000000.0
+
+				percent := int((currentSec / totalDuration.Seconds()) * 100)
+				if percent > 100 {
+					percent = 100
+				}
+				if percent < 0 {
+					percent = 0
+				}
+
+				sendConvertProgress(targetUserID, percent, websocket.ConvertStatusProcessing, track)
+			}
+		}
+	}()
+
+	// wait for FFmpeg complete
+	if err := cmd.Wait(); err != nil {
+		os.Remove(tmpPath)
+		sendConvertError(targetUserID, err, track)
+		return "", fmt.Errorf("failed to complete ffmpeg: %w", err)
+	}
+
+	ct := lib.GetConvertContext()
+	ct.Cache.Store(strconv.Itoa(track.ID)+"_"+st, tmpPath)
+
+	sendConvertProgress(targetUserID, 100, websocket.ConvertStatusCompleted, track)
+
+	return tmpPath, nil
 }

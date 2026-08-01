@@ -3,11 +3,16 @@ import { html } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { ref, createRef, type Ref } from 'lit/directives/ref.js'
 import { repeat } from 'lit/directives/repeat.js'
-import type { Track, ConvertTrackParams } from '@/types'
+import { onMessage } from '@/modules/websocket/websocket'
+import {
+    type Track, type TrackConvert, type ConvertTrackParams,
+    EventConvertProgressUpdate, EventConvertTrackProgressUpdate,
+    ConvertStatusProcessing, ConvertStatusCompleted, ConvertStatusFailed
+} from '@/types'
 import store, {
     fetchTracks, setProgressIndeterminate, setTrackItem, updateTrack, getTracksKey,
     type RootState, type updateTrackParams, type TracksQuery, fetchTracksMode,
-    setCurrentTracksKey, deleteItem, convertTrack
+    setCurrentTracksKey, deleteItem, convertTrack, downloadConvert
 } from '@/store'
 import { formatDynamicTime } from '@/utils/func'
 import '@awesome.me/webawesome/dist/components/format-date/format-date.js'
@@ -17,6 +22,7 @@ import '@awesome.me/webawesome/dist/components/tooltip/tooltip.js'
 import '@awesome.me/webawesome/dist/components/dropdown/dropdown.js'
 import '@awesome.me/webawesome/dist/components/dropdown-item/dropdown-item.js'
 import '@awesome.me/webawesome/dist/components/dialog/dialog.js'
+import '@awesome.me/webawesome/dist/components/progress-bar/progress-bar.js'
 import { classMap } from 'lit/directives/class-map.js'
 import { notify } from '@/utils/notifier'
 
@@ -36,6 +42,21 @@ export class TracksList extends SonaryLitElement {
 
     @state()
     private _hasNext: boolean = false
+
+    @state()
+    private _pregapTrack: Track | null = null
+
+    @state()
+    private _convertProgress: number = 0
+
+    @state()
+    private _convertTracksProgress: { [key: number]: number } = []
+
+    @state()
+    private _convertTracks: TrackConvert[] = []
+
+    @state()
+    private _convertJobId: number = 0
 
     @property({ type: Number })
     artistId: number | null = null
@@ -64,17 +85,55 @@ export class TracksList extends SonaryLitElement {
         return getTracksKey(this.query)
     }
 
+    private _unsubscribeMessage: (() => void) | null = null
+
     connectedCallback() {
         super.connectedCallback()
         if (this.storeState.tracks.currentKey !== this.queryKey) {
             this._loadItems()
         }
+
+        this._unsubscribeMessage = onMessage((msg) => {
+            let eventMsg = JSON.parse(msg)
+            if (eventMsg.type === EventConvertProgressUpdate) {
+                this._convertProgress = eventMsg.progress
+                console.log(eventMsg)
+                if (eventMsg.total === eventMsg.processed) {
+                    notify('Convert finished successfully', 'success')
+                    store.dispatch(downloadConvert(this._convertJobId)).then(() => { })
+                }
+            } else if (eventMsg.type === EventConvertTrackProgressUpdate) {
+                if ([ConvertStatusProcessing, ConvertStatusCompleted].includes(eventMsg.status)) {
+                    this._convertTracksProgress = {
+                        ...this._convertTracksProgress,
+                        [eventMsg.track_id]: eventMsg.progress
+                    }
+                    if (eventMsg.status === ConvertStatusCompleted) {
+                        notify('Track ' + eventMsg.track_title + ' converted successfully', 'success')
+                    }
+                } else if (eventMsg.status === ConvertStatusFailed) {
+                    notify(eventMsg.error, 'danger')
+                }
+            }
+        })
+    }
+
+    disconnectedCallback() {
+        if (this._unsubscribeMessage) {
+            this._unsubscribeMessage()
+        }
+        super.disconnectedCallback()
     }
 
     // store state changed
     stateChanged(state: RootState): void {
         super.stateChanged(state)
         this._items = state.tracks.items
+        if (this._items.length === 0) {
+            this.dispatchEvent(new CustomEvent('tracks-empty', { bubbles: true, composed: true }));
+        } else {
+            this.dispatchEvent(new CustomEvent('tracks-loaded', { bubbles: true, composed: true }));
+        }
         this._hasNext = state.tracks.hasNext
     }
 
@@ -103,6 +162,8 @@ export class TracksList extends SonaryLitElement {
     }
 
     viewLyricsDialogRef: Ref<HTMLInputElement> = createRef()
+    pregapDialogRef: Ref<HTMLInputElement> = createRef()
+    convertDialogRef: Ref<HTMLInputElement> = createRef()
 
     private _delDialogHide() {
         this._selectedItem = null
@@ -133,15 +194,70 @@ export class TracksList extends SonaryLitElement {
         return [...new Set(this._items.map((track: Track) => track.artist))].length > 1
     }
 
-    private _convertTrack(trackId: number) {
+    private _onConvertClick(track: Track) {
+        if (track.pregap && track.pregap_duration > 0) {
+            this._pregapTrack = track
+            const dialog: any = this.pregapDialogRef.value!
+            dialog.open = true
+        } else {
+            this._executeConvert(track, false)
+        }
+    }
+
+    private _executeConvert(track: Track, includePregap: boolean) {
+        this._convertTracks = [{ id: track.id, title: track.title }]
+        this._convertTracksProgress = []
+        this._convertTracksProgress[track.id] = 0
+        this._sendConvert([track.id], includePregap)
+    }
+
+    private _executeConvertBatch() {
+        this._convertTracks = []
+        this._convertTracksProgress = []
+        let trackIds = <number[]>[]
+        this._items.forEach((track) => {
+            this._convertTracksProgress[track.id] = 0
+            this._convertTracks.push({ id: track.id, title: track.title })
+            trackIds.push(track.id)
+        })
+        this._sendConvert(trackIds, false)
+    }
+
+    private _sendConvert(trackIds: number[], includePregap: boolean) {
+        this._convertProgress = 0
+        this._convertJobId = 0
         this.store.dispatch(setProgressIndeterminate(true))
-        store.dispatch(convertTrack(trackId, <ConvertTrackParams>{
+        store.dispatch(convertTrack(trackIds, <ConvertTrackParams>{
             format: 'mp3',
             mode: 'cbr',
             quality: '320',
-        })).then(() => {
+            include_pregap: includePregap
+        })).then((response: any) => {
+            if (!response.directDownload) {
+                const dialog: any = this.convertDialogRef.value!
+                dialog.open = true
+                this._convertJobId = response.job_id
+
+                console.log(response)
+            }
             this.store.dispatch(setProgressIndeterminate(false))
         })
+    }
+
+    private _handlePregapChoice(includePregap: boolean) {
+        if (!this._pregapTrack) return
+        const dialog: any = this.pregapDialogRef.value!
+        dialog.open = false
+
+        this._executeConvert(this._pregapTrack, includePregap)
+        this._pregapTrack = null
+    }
+
+    private _formatPregapDuration(pregapDuration: number): string {
+        if (!pregapDuration) return '00:00'
+        const minutes = Math.floor(pregapDuration / 60)
+        const seconds = pregapDuration % 60
+        return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
     }
 
     render() {
@@ -153,7 +269,7 @@ export class TracksList extends SonaryLitElement {
       <wa-button id="options" appearance="plain" slot="trigger" size="s" variant="neutral" aria-labelledby="wa-tooltip-4JMAo0Oz3lCxM3wujKNlc">
         <wa-icon name="ellipsis" label="Options" role="img" aria-label="Options" library="default" rotate="0" style="--rotate-angle: 0deg;"></wa-icon>
       </wa-button>
-      <wa-dropdown-item value="convert">Convert</wa-dropdown-item>
+      <wa-dropdown-item value="convert" @click="${() => this._executeConvertBatch()}">Convert</wa-dropdown-item>
     </wa-dropdown>
     <wa-tooltip for="options" placement="bottom" distance="2" without-arrow id="wa-tooltip-4JMAo0Oz3lCxM3wujKNlc">Options</wa-tooltip>
   </div>
@@ -214,7 +330,7 @@ export class TracksList extends SonaryLitElement {
           <wa-button appearance="plain" slot="trigger" size="s" variant="neutral">
             <wa-icon name="ellipsis" label="Track Options" role="img" aria-label="Track Options" library="default" rotate="0" style="--rotate-angle: 0deg;"></wa-icon>
           </wa-button>
-          <wa-dropdown-item value="convert" @click="${() => this._convertTrack(item.id)}">Convert</wa-dropdown-item>
+          <wa-dropdown-item value="convert" @click="${() => this._onConvertClick(item)}">Convert</wa-dropdown-item>
           ${item.lyrics &&
             html`<wa-dropdown-item value="lyrics" @click="${() => this._viewLyrics(item)}">View lyrics</wa-dropdown-item>`}
         </wa-dropdown>
@@ -229,6 +345,36 @@ export class TracksList extends SonaryLitElement {
   <wa-dialog label="${this._selectedItem?.artist + ' - ' + this._selectedItem?.title}" id="lyrics-view" style="--width: 50vw;" ${ref(this.viewLyricsDialogRef)} @wa-after-hide="${this._delDialogHide}">
     <pre>${this._selectedItem?.lyrics}</pre>
     <wa-button slot="footer" variant="brand" data-dialog="close">Close</wa-button>
+  </wa-dialog>
+
+  <wa-dialog ${ref(this.pregapDialogRef)} label="Pregap detected">
+    <p>
+      This track contains a pregap of length
+      <strong>${this._formatPregapDuration(this._pregapTrack?.pregap_duration || 0)}</strong>.
+      Want to add it to the beginning of the song?
+    </p>
+    <wa-button slot="footer" variant="neutral" size="s" @click="${() => this._handlePregapChoice(false)}">
+      No, cut it off
+    </wa-button>
+    <wa-button slot="footer" variant="brand" size="s" @click="${() => this._handlePregapChoice(true)}">
+      Yes, add
+    </wa-button>
+  </wa-dialog>
+
+  <wa-dialog ${ref(this.convertDialogRef)} label="Convert" without-header>
+    <div>
+      <div class="${classMap({ 'wa-visually-hidden': this._convertTracks.length <= 1 })}">
+        <b>Convert</b>
+        <wa-progress-bar .value="${this._convertProgress}">${this._convertProgress}%</wa-progress-bar>
+      </div>
+      ${repeat(this._convertTracks, (item: TrackConvert) => item.id, (item: TrackConvert, index: number) => html`
+      <b>Convert track ${item.title}</b>
+      <wa-progress-bar data-key="${index}" .value="${this._convertTracksProgress[item.id]}">${this._convertTracksProgress[item.id]}%</wa-progress-bar>
+      `)}
+    </div>
+    ${this._convertProgress >= 100 ? html`
+    <wa-button slot="footer" variant="brand" size="s" data-dialog="close">Close</wa-button>
+    ` : ''}
   </wa-dialog>
 
 </div>

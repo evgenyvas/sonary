@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -10,11 +11,12 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"sonary/internal/config"
 	"sonary/internal/database"
-	"sonary/internal/ffmpeg"
 	"sonary/internal/job"
 	"sonary/internal/lib"
 	"sonary/internal/websocket"
@@ -343,8 +345,7 @@ func (api *API) GetAlbum(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(apiAlbum)
 }
 
-// convert track to other format and download result immediately
-func (api *API) ConvertTrack(w http.ResponseWriter, r *http.Request) {
+func (api *API) StartConvert(w http.ResponseWriter, r *http.Request) {
 	var conv lib.APITrackConvertPost
 	err := json.NewDecoder(r.Body).Decode(&conv)
 	if err != nil {
@@ -352,63 +353,168 @@ func (api *API) ConvertTrack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	idVal := r.PathValue("id")
-	id, err := strconv.Atoi(idVal)
+	if len(conv.TrackIDs) == 1 && conv.Format == "mp3" {
+		track, err := database.GetTrack(api.readDB, conv.TrackIDs[0])
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if track.FileType == "MP3" {
+			file, err := os.Open(track.Path)
+			if err != nil {
+				http.Error(w, "File not found", http.StatusNotFound)
+				return
+			}
+			defer file.Close()
+
+			w.Header().Set("Content-Type", "audio/mpeg")
+			rawFilename := fmt.Sprintf("%s - %s.%s", track.Artist, track.Title, conv.Format)
+			cleanFilename := utils.SanitizeFilename(rawFilename)
+			utf8Filename := url.PathEscape(cleanFilename)
+			disposition := fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, cleanFilename, utf8Filename)
+			w.Header().Set("Content-Disposition", disposition)
+			w.Header().Set("Access-Control-Expose-Headers", "Content-Disposition")
+
+			io.Copy(w, file)
+			return
+		}
+	}
+
+	// create job to convert tracks
+	jobId, err := job.Enqueue(api.writeDB, sql.NullInt64{Valid: false},
+		job.TaskConvertTracks, job.JobConvertTracks{
+			UserID:   conv.UserID,
+			TracksID: conv.TrackIDs,
+			JobConvertParams: job.JobConvertParams{
+				Format:        conv.Format,
+				Mode:          conv.Mode,
+				Quality:       conv.Quality,
+				IncludePregap: conv.IncludePregap,
+			},
+		})
+	if err != nil {
+		log.Fatalf("Add job error: %v", err)
+		http.Error(w, "Failed to enqueue job", http.StatusInternalServerError)
+		return
+	}
+
+	apiConvert := lib.APIConvertTracks{
+		APIStatus: lib.APIStatus{
+			Status:  http.StatusOK,
+			Message: "ok",
+		},
+		JobID: jobId,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(apiConvert)
+}
+
+// download converted track or tracks
+func (api *API) ConvertDownload(w http.ResponseWriter, r *http.Request) {
+	idVal := r.PathValue("jobId")
+	jobId, err := strconv.Atoi(idVal)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	track, err := database.GetTrack(api.readDB, id)
+	// find child jobs
+	trackJobs, err := job.GetJobs(api.readDB, job.JobFilter{
+		ParentID: utils.Ptr(jobId),
+	}, false)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	// check if audio file exists (cannot use Open, because ffmpeg can open too)
-	if _, err := os.Stat(track.Path); os.IsNotExist(err) {
-		http.Error(w, "Source file not found", http.StatusNotFound)
-		return
+	ct := lib.GetConvertContext()
+	isMultiple := len(trackJobs) > 1
+	zipWriter := new(zip.Writer)
+
+	if isMultiple {
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Disposition", `attachment; filename="tracks.zip"`)
+		w.Header().Set("Access-Control-Expose-Headers", "Content-Disposition")
+
+		zipWriter = zip.NewWriter(w)
+
+		defer func() {
+			zipWriter.Close()
+		}()
 	}
 
-	/*
-		//Этот трек содержит прегап длительностью 00:02. Хотите добавить его к началу песни?
-		startDuration := track.CueOffset
-		durationSec := track.Duration
-
-		// Если юзер попросил прегап и он есть у трека в базе
-		if conv.IncludePregap && track.HasPregap {
-			// Сдвигаем точку старта назад на длину прегапа (попадаем на INDEX 00)
-			startDuration = track.CueOffset - track.PregapDuration
-
-			// Увеличиваем общую длину отрезка, чтобы захватить этот прегап
-			durationSec = track.Duration + track.PregapDuration
-		}
-	*/
-
-	w.Header().Set("Content-Type", "audio/mpeg")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.%s"`, track.Title, conv.Format))
-	w.Header().Set("Access-Control-Expose-Headers", "Content-Disposition")
-
-	if track.FileType == "MP3" {
-		// no need to convert
-		file, err := os.Open(track.Path)
+	for _, j := range trackJobs {
+		var jobPayload job.JobConvertTrack
+		err := json.Unmarshal(j.Payload, &jobPayload)
 		if err != nil {
-			http.Error(w, "File not found", http.StatusNotFound)
+			http.Error(w, fmt.Sprintf("Job %d payload unmarshal error", j.ID), http.StatusInternalServerError)
 			return
 		}
-		defer file.Close()
-		io.Copy(w, file)
-	} else {
-		ff := ffmpeg.NewFFmpeg()
-		err = ff.ConvertTrackStream(track, w, lib.ConvertParams{
-			Format:  conv.Format,
-			Mode:    conv.Mode,
-			Quality: conv.Quality,
-		})
+
+		track, err := database.GetTrack(api.readDB, jobPayload.TrackID)
 		if err != nil {
-			log.Printf("Conversion method failed: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
+
+		if j.Status != job.StatusCompleted {
+			http.Error(w, fmt.Sprintf("Job %d is not completed", j.ID), http.StatusInternalServerError)
+			return
+		}
+		pathVal, ok := ct.Jobs.Load(j.ID)
+		if !ok {
+			http.Error(w, fmt.Sprintf("Job %d not found or expired", j.ID), http.StatusNotFound)
+			return
+		}
+		filePath := pathVal.(string)
+		file, err := os.Open(filePath)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to open temp file: %v", err), http.StatusNotFound)
+			return
+		}
+
+		if isMultiple {
+			// multiple tracks processed - create archive
+			rawFilename := fmt.Sprintf("%s - %s.%s", track.Artist, track.Title, jobPayload.Format)
+			filenameInZip := utils.SanitizeFilename(rawFilename)
+			header := &zip.FileHeader{
+				Name:   filenameInZip,
+				Method: zip.Deflate, // standard ZIP compression
+			}
+			// use UTF-8 for filename
+			header.Flags |= 0x800
+
+			writerInZip, err := zipWriter.CreateHeader(header)
+			if err != nil {
+				file.Close()
+				http.Error(w, fmt.Sprintf("Failed to create zip entry header: %v", err), http.StatusInternalServerError)
+				return
+			}
+
+			_, err = io.Copy(writerInZip, file)
+			if err != nil {
+				file.Close()
+				http.Error(w, fmt.Sprintf("Failed to copy file to zip: %v", err), http.StatusInternalServerError)
+				return
+			}
+		} else {
+			// single track processed
+			w.Header().Set("Content-Type", "audio/mpeg")
+			rawFilename := fmt.Sprintf("%s - %s.%s", track.Artist, track.Title, jobPayload.Format)
+			cleanFilename := utils.SanitizeFilename(rawFilename)
+			utf8Filename := url.PathEscape(cleanFilename)
+			disposition := fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, cleanFilename, utf8Filename)
+			w.Header().Set("Content-Disposition", disposition)
+			w.Header().Set("Access-Control-Expose-Headers", "Content-Disposition")
+			io.Copy(w, file)
+		}
+
+		file.Close()
+		os.Remove(filePath)
+		ct.Jobs.Delete(j.ID)
 	}
 }
 
@@ -449,7 +555,7 @@ func main() {
 	}
 
 	log.Println("Starting sync directories ...")
-	_, err := job.Enqueue(writeDB, job.TaskSyncDirectories, nil)
+	_, err := job.Enqueue(writeDB, sql.NullInt64{Valid: false}, job.TaskSyncDirectories, nil)
 	if err != nil {
 		log.Printf("Error: %v", err)
 		os.Exit(1)
@@ -468,7 +574,8 @@ func main() {
 	mux.HandleFunc("GET /api/v1/artists/{id}", api.GetArtist)
 	mux.HandleFunc("GET /api/v1/albums", api.GetAlbums)
 	mux.HandleFunc("GET /api/v1/albums/{id}", api.GetAlbum)
-	mux.HandleFunc("POST /api/v1/tracks/{id}/convert", api.ConvertTrack)
+	mux.HandleFunc("POST /api/v1/convert/start", api.StartConvert)
+	mux.HandleFunc("POST /api/v1/convert/download/{jobId}", api.ConvertDownload)
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		tmpl := template.Must(template.ParseFiles("internal/templates/index.html"))

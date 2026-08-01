@@ -1,4 +1,5 @@
 let ws: WebSocket | null = null
+let currentUserId: string | null = null
 
 type MessageHandler = (msg: string) => void
 type StatusHandler = (status: "open" | "close" | "error") => void
@@ -6,11 +7,15 @@ type StatusHandler = (status: "open" | "close" | "error") => void
 const messageHandlers: MessageHandler[] = []
 const statusHandlers: StatusHandler[] = []
 
-export function connect(url = `${import.meta.env.VITE_WEBSOCKET_URL}`): void {
-    ws = new WebSocket(url)
+export function connect(connectionId?: string, baseUrl = `${import.meta.env.VITE_WEBSOCKET_URL}`): void {
+    currentUserId = connectionId || crypto.randomUUID()
+
+    const urlWithParams = `${baseUrl}?userId=${encodeURIComponent(currentUserId)}`
+
+    ws = new WebSocket(urlWithParams)
 
     ws.onopen = () => {
-        console.log("WebSocket Connected")
+        console.log("WebSocket Connected. ID:", currentUserId)
         statusHandlers.forEach(h => h("open"))
     }
 
@@ -21,12 +26,16 @@ export function connect(url = `${import.meta.env.VITE_WEBSOCKET_URL}`): void {
     ws.onclose = () => {
         console.log("WebSocket Closed, retrying...")
         statusHandlers.forEach(h => h("close"))
-        setTimeout(() => connect(url), 1000)
+        setTimeout(() => connect(currentUserId!, baseUrl), 1000)
     }
 
     ws.onerror = () => {
         statusHandlers.forEach(h => h("error"))
     }
+}
+
+export function getUserId(): string | null {
+    return currentUserId
 }
 
 export function sendMessage(message: string): void {
@@ -37,8 +46,15 @@ export function sendMessage(message: string): void {
     }
 }
 
-export function onMessage(handler: MessageHandler): void {
+export function onMessage(handler: MessageHandler): () => void {
     messageHandlers.push(handler)
+    // Return a function that filters this specific handler out
+    return () => {
+        const index = messageHandlers.indexOf(handler);
+        if (index !== -1) {
+            messageHandlers.splice(index, 1);
+        }
+    }
 }
 
 export function onStatus(handler: StatusHandler): void {

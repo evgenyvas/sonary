@@ -17,7 +17,7 @@ import '@awesome.me/webawesome/dist/components/dropdown-item/dropdown-item.js'
 import '@awesome.me/webawesome/dist/components/progress-bar/progress-bar.js'
 import '@awesome.me/webawesome/dist/components/breadcrumb/breadcrumb.js'
 import '@awesome.me/webawesome/dist/components/breadcrumb-item/breadcrumb-item.js'
-import { EventProgressUpdate } from '@/types'
+import { EventImportProgressUpdate } from '@/types'
 import '@/components/tracks-list'
 import '@/components/tracks-view'
 import '@/components/artists-list'
@@ -131,7 +131,7 @@ export class SonaryApp extends SonaryLitElement {
 
         onMessage((msg) => {
             let eventMsg = JSON.parse(msg)
-            if (eventMsg.type === EventProgressUpdate) {
+            if (eventMsg.type === EventImportProgressUpdate) {
                 this.store.dispatch(setProgress(eventMsg.progress))
             }
         })
@@ -148,12 +148,12 @@ export class SonaryApp extends SonaryLitElement {
 
     render() {
         return html`
-      <wa-progress-bar id="progress-bar" class=${classMap({
+      <wa-progress-bar id="progress-bar" class="${classMap({
             'wa-visually-hidden': !this._progressVisible
-        })} .value="${this._progress}" ?indeterminate="${this._progressIndeterminate}">Scanning library ${this._progress}%</wa-progress-bar>
+        })}" .value="${this._progress}" ?indeterminate="${this._progressIndeterminate}">Scanning library ${this._progress}%</wa-progress-bar>
     <wa-page view="desktop" navigation-placement="start" disable-navigation-toggle="">
       <div id="main-content" slot="skip-to-content-target"></div>
-      <div id="callout-toast-container" style="position: fixed; bottom: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 10px; max-width: 350px; width: 100%;"></div>
+      <div id="callout-toast-container" popover="manual"></div>
       <header slot="header">
           <a href="${this._baseRoute}" class="wa-link-plain">
         <div class="wa-cluster">

@@ -119,7 +119,16 @@ type AlbumsGetParams struct {
 }
 
 type ConvertParams struct {
-	Format  string
-	Mode    string
-	Quality string
+	Format        string
+	Mode          string
+	Quality       string
+	IncludePregap bool
+}
+
+func (params *ConvertParams) ToString() string {
+	pr := "pregap"
+	if !params.IncludePregap {
+		pr = "no" + pr
+	}
+	return params.Format + "_" + params.Mode + "_" + params.Quality + "_" + pr
 }

@@ -134,6 +134,11 @@ type APIAlbumList struct {
 	HasNext bool       `json:"next"`
 }
 
+type APIConvertTracks struct {
+	APIStatus
+	JobID int64 `json:"job_id"`
+}
+
 func (t *AlbumDB) ToAPI() APIAlbum {
 	return APIAlbum{
 		ID:       t.ID,
@@ -163,7 +168,10 @@ func (m *FetchAlbumsMode) UnmarshalText(text []byte) error {
 }
 
 type APITrackConvertPost struct {
-	Format  string `json:"format"`
-	Mode    string `json:"mode"`
-	Quality string `json:"quality"`
+	UserID        string `json:"userId"` // WebSocket userId
+	TrackIDs      []int  `json:"track_ids"`
+	Format        string `json:"format"`
+	Mode          string `json:"mode"`
+	Quality       string `json:"quality"`
+	IncludePregap bool   `json:"include_pregap"`
 }

@@ -23,7 +23,7 @@ func GetArtistKey(artistName string) string {
 }
 
 func GetOrAddArtist(db database.DBTX, artistName string) (int, error) {
-	ct := lib.GetImportContext(false)
+	ct := lib.GetImportContext()
 	id, ok := ct.ArtistCache[GetArtistKey(artistName)]
 	if !ok {
 		artist, err := database.GetArtist(db, lib.ArtistsGetParams{Name: utils.Ptr(artistName)})
@@ -51,7 +51,7 @@ func GetAlbumKey(artistName string, albumName string) string {
 }
 
 func GetOrAddAlbum(db database.DBTX, artistID int, track *lib.Track) (int, error) {
-	ct := lib.GetImportContext(false)
+	ct := lib.GetImportContext()
 	id, ok := ct.AlbumCache[GetAlbumKey(track.Artist, track.Album)]
 	if !ok {
 		album, err := database.GetAlbum(db, lib.AlbumsGetParams{

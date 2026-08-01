@@ -13,15 +13,63 @@ import (
 
 // Hub/Broadcast pattern
 
+type WebSocketEvent interface {
+	GetUserID() string
+}
+
+type BaseEvent struct {
+	UserID string `json:"-"` // minus hides field from the client's JSON
+}
+
+func (b BaseEvent) GetUserID() string {
+	return b.UserID
+}
+
 type ProgressEvent struct {
+	BaseEvent
 	Type     string `json:"type"`
 	Progress int    `json:"progress"` // Percentage from 0 to 100
 }
 
+type ProgressConvertEvent struct {
+	BaseEvent
+	Type      string `json:"type"`
+	Total     int    `json:"total"`
+	Processed int    `json:"processed"`
+	Progress  int    `json:"progress"` // Percentage from 0 to 100
+}
+
+const ConvertStatusProcessing = "PROCESSING"
+const ConvertStatusCompleted = "COMPLETED"
+const ConvertStatusFailed = "FAILED"
+
+type ProgressTrackConvertEvent struct {
+	BaseEvent
+	Type       string `json:"type"`
+	Progress   int    `json:"progress"` // Percentage from 0 to 100
+	Status     string `json:"status"`
+	Error      string `json:"error"`
+	TrackID    int    `json:"track_id"`
+	TrackTitle string `json:"track_title"`
+}
+
+const MessageVariantError = "MESSAGE_ERROR"
+
+type MessageEvent struct {
+	BaseEvent
+	Variant string `json:"variant"`
+	Message string `json:"message"`
+}
+
+type clientSession struct {
+	userID string
+	conn   *websocket.Conn
+}
+
 type Hub struct {
-	Clients    map[*websocket.Conn]bool
-	Broadcast  chan ProgressEvent
-	register   chan *websocket.Conn
+	Clients    map[string]*websocket.Conn
+	Send       chan WebSocketEvent
+	register   chan clientSession
 	unregister chan *websocket.Conn
 	mu         sync.Mutex
 }
@@ -34,10 +82,10 @@ var (
 func GetHub() *Hub {
 	once.Do(func() {
 		instance = &Hub{
-			Broadcast:  make(chan ProgressEvent),
-			register:   make(chan *websocket.Conn),
+			Clients:    make(map[string]*websocket.Conn),
+			Send:       make(chan WebSocketEvent),
+			register:   make(chan clientSession),
 			unregister: make(chan *websocket.Conn),
-			Clients:    make(map[*websocket.Conn]bool),
 		}
 	})
 	return instance
@@ -46,28 +94,49 @@ func GetHub() *Hub {
 func (h *Hub) Run() {
 	for {
 		select {
-		case client := <-h.register:
+		case session := <-h.register:
 			h.mu.Lock()
-			h.Clients[client] = true
+			h.Clients[session.userID] = session.conn
 			h.mu.Unlock()
-		case client := <-h.unregister:
+		case clientConn := <-h.unregister:
 			h.mu.Lock()
-			if _, ok := h.Clients[client]; ok {
-				delete(h.Clients, client)
-				client.Close()
+			for id, conn := range h.Clients {
+				if conn == clientConn {
+					delete(h.Clients, id)
+					conn.Close()
+					break
+				}
 			}
 			h.mu.Unlock()
-		case event := <-h.Broadcast:
+		case event := <-h.Send:
 			h.mu.Lock()
-			for client := range h.Clients {
-				// Gorilla WriteJSON handles concurrent-safe encoding to connection
+
+			userID := event.GetUserID()
+
+			// send only to specific user
+			if userID != "" {
+				if client, ok := h.Clients[userID]; ok {
+					err := client.WriteJSON(event)
+					if err != nil {
+						log.Printf("Target client disconnected: %v", err)
+						client.Close()
+						delete(h.Clients, userID)
+					}
+				}
+				h.mu.Unlock()
+				continue
+			}
+
+			// broadcast
+			for id, client := range h.Clients {
 				err := client.WriteJSON(event)
 				if err != nil {
 					log.Printf("Client disconnected implicitly: %v", err)
 					client.Close()
-					delete(h.Clients, client)
+					delete(h.Clients, id)
 				}
 			}
+
 			h.mu.Unlock()
 		}
 	}
@@ -82,22 +151,30 @@ var upgrader = websocket.Upgrader{
 }
 
 func WsEndpoint(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("userId")
+	if userID == "" {
+		http.Error(w, "Unauthorized: missing userId", http.StatusBadRequest)
+		return
+	}
+
 	hub := GetHub()
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println("Upgrade error:", err)
 		return
 	}
-	hub.register <- ws
+
+	hub.register <- clientSession{userID: userID, conn: ws}
 	defer func() { hub.unregister <- ws }()
 
 	// after client connect get progress percent
-	ct := lib.GetImportContext(false)
+	ct := lib.GetImportContext()
 	if ct.Progress.Total > 0 {
 		processed := int(ct.Progress.Processed.Load())
-		hub.Broadcast <- ProgressEvent{
-			Type:     lib.EventProgressUpdate,
-			Progress: utils.GetPercent(processed, ct.Progress.Total),
+		hub.Send <- ProgressEvent{
+			BaseEvent: BaseEvent{UserID: userID},
+			Type:      lib.EventImportProgressUpdate,
+			Progress:  utils.GetPercent(processed, ct.Progress.Total),
 		}
 	}
 
