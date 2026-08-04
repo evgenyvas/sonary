@@ -112,3 +112,13 @@ func SanitizeFilename(name string) string {
 
 	return strings.TrimSpace(name)
 }
+
+func WSLToWindowsPath(wslPath string) string {
+	if strings.HasPrefix(wslPath, "/mnt/") && len(wslPath) > 5 {
+		driveLetter := string(wslPath[5])
+		remainingPath := wslPath[6:]
+		winPath := strings.ToUpper(driveLetter) + ":" + remainingPath
+		return strings.ReplaceAll(winPath, "/", "\\")
+	}
+	return strings.ReplaceAll(wslPath, "/", "\\")
+}

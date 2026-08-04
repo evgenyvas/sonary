@@ -13,10 +13,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"os/signal"
 	"sonary/internal/config"
 	"sonary/internal/database"
+	"sonary/internal/foobar2000"
 	"sonary/internal/job"
 	"sonary/internal/lib"
 	"sonary/internal/websocket"
@@ -29,9 +29,9 @@ import (
 type API struct {
 	readDB  *sql.DB
 	writeDB *sql.DB
+	//Config  config.Config
 	//Store lib.Store
 	//Logger     Logger
-	//Config     Config
 	//Mailer     Mailer
 	//Cache      Cache
 }
@@ -518,6 +518,29 @@ func (api *API) ConvertDownload(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (api *API) PlayInFoobar(w http.ResponseWriter, r *http.Request) {
+	var play lib.APITrackPlayPost
+	err := json.NewDecoder(r.Body).Decode(&play)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if len(play.TrackIDs) == 0 {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	player := foobar2000.GetPlayer()
+
+	if err := player.Play(play.TrackIDs); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -576,6 +599,7 @@ func main() {
 	mux.HandleFunc("GET /api/v1/albums/{id}", api.GetAlbum)
 	mux.HandleFunc("POST /api/v1/convert/start", api.StartConvert)
 	mux.HandleFunc("POST /api/v1/convert/download/{jobId}", api.ConvertDownload)
+	mux.HandleFunc("POST /api/v1/play", api.PlayInFoobar)
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		tmpl := template.Must(template.ParseFiles("internal/templates/index.html"))

@@ -175,3 +175,8 @@ type APITrackConvertPost struct {
 	Quality       string `json:"quality"`
 	IncludePregap bool   `json:"include_pregap"`
 }
+
+type APITrackPlayPost struct {
+	UserID   string `json:"userId"` // WebSocket userId
+	TrackIDs []int  `json:"track_ids"`
+}

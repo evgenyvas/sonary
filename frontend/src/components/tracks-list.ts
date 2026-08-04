@@ -12,7 +12,7 @@ import {
 import store, {
     fetchTracks, setProgressIndeterminate, setTrackItem, updateTrack, getTracksKey,
     type RootState, type updateTrackParams, type TracksQuery, fetchTracksMode,
-    setCurrentTracksKey, deleteItem, convertTrack, downloadConvert
+    setCurrentTracksKey, deleteItem, convertTrack, downloadConvert, playTrack
 } from '@/store'
 import { formatDynamicTime } from '@/utils/func'
 import '@awesome.me/webawesome/dist/components/format-date/format-date.js'
@@ -244,6 +244,28 @@ export class TracksList extends SonaryLitElement {
         })
     }
 
+    private _executePlay(track: Track) {
+        this._convertTracks = [{ id: track.id, title: track.title }]
+        this._convertTracksProgress = []
+        this._convertTracksProgress[track.id] = 0
+        this._sendPlay([track.id])
+    }
+
+    private _executePlayBatch() {
+        let trackIds = <number[]>[]
+        this._items.forEach((track) => {
+            trackIds.push(track.id)
+        })
+        this._sendPlay(trackIds)
+    }
+
+    private _sendPlay(trackIds: number[]) {
+        this.store.dispatch(setProgressIndeterminate(true))
+        store.dispatch(playTrack(trackIds)).then(() => {
+            this.store.dispatch(setProgressIndeterminate(false))
+        })
+    }
+
     private _handlePregapChoice(includePregap: boolean) {
         if (!this._pregapTrack) return
         const dialog: any = this.pregapDialogRef.value!
@@ -270,6 +292,7 @@ export class TracksList extends SonaryLitElement {
         <wa-icon name="ellipsis" label="Options" role="img" aria-label="Options" library="default" rotate="0" style="--rotate-angle: 0deg;"></wa-icon>
       </wa-button>
       <wa-dropdown-item value="convert" @click="${() => this._executeConvertBatch()}">Convert</wa-dropdown-item>
+      <wa-dropdown-item value="play" @click="${() => this._executePlayBatch()}">Play</wa-dropdown-item>
     </wa-dropdown>
     <wa-tooltip for="options" placement="bottom" distance="2" without-arrow id="wa-tooltip-4JMAo0Oz3lCxM3wujKNlc">Options</wa-tooltip>
   </div>
@@ -331,6 +354,7 @@ export class TracksList extends SonaryLitElement {
             <wa-icon name="ellipsis" label="Track Options" role="img" aria-label="Track Options" library="default" rotate="0" style="--rotate-angle: 0deg;"></wa-icon>
           </wa-button>
           <wa-dropdown-item value="convert" @click="${() => this._onConvertClick(item)}">Convert</wa-dropdown-item>
+          <wa-dropdown-item value="play" @click="${() => this._executePlay(item)}">Play</wa-dropdown-item>
           ${item.lyrics &&
             html`<wa-dropdown-item value="lyrics" @click="${() => this._viewLyrics(item)}">View lyrics</wa-dropdown-item>`}
         </wa-dropdown>

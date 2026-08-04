@@ -12,11 +12,15 @@ import (
 )
 
 type Config struct {
-	Host        string   `env:"HOST"`
-	AppEnv      string   `env:"APP_ENV"`
-	RootPaths   []string `env:"ROOT_PATHS"`
-	DatabaseDsn string   `env:"DATABASE_DSN"`
-	WorkerCount int      `env:"WORKER_COUNT"`
+	Host         string   `env:"HOST"`
+	AppEnv       string   `env:"APP_ENV"`
+	RootPaths    []string `env:"ROOT_PATHS"`
+	DatabaseDsn  string   `env:"DATABASE_DSN"`
+	WorkerCount  int      `env:"WORKER_COUNT"`
+	FoobarPath   string   `env:"FOOBAR_PATH"`
+	IsWsl        bool     `env:"WSL"`
+	FoobarAPI    bool     `env:"FOOBAR_API"`
+	FoobarAPIUrl string   `env:"FOOBAR_API_URL"`
 }
 
 var instance *Config

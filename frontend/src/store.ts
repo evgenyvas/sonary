@@ -535,4 +535,13 @@ export const downloadConvert = (jobId: number): any => {
     }
 }
 
+export const playTrack = (trackIds: number[]): any => {
+    return async () => {
+        return httpClient('/v1/play', {
+            method: 'POST',
+            body: { track_ids: trackIds }
+        })
+    }
+}
+
 export default store
