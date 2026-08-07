@@ -2,7 +2,6 @@ import { legacy_createStore as createStore, combineReducers, applyMiddleware } f
 import { thunk } from 'redux-thunk'
 import type { Track, Artist, Album, ConvertTrackParams } from '@/types'
 import httpClient, { flatten } from '@/utils/request'
-import { getUserId } from '@/modules/websocket/websocket'
 
 export interface TracksQuery {
     mode: fetchTracksMode

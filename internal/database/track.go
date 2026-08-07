@@ -286,6 +286,97 @@ func SaveAlbum(db DBTX, albumInput *lib.Album) (*lib.AlbumDB, error) {
 	return album, nil
 }
 
+func GetArtistKey(artistName string) string {
+	return strings.ToLower(artistName)
+}
+
+func GetOrAddArtist(db DBTX, artistName string) (int, error) {
+	ct := lib.GetImportContext()
+	id, ok := ct.ArtistCache[GetArtistKey(artistName)]
+	if !ok {
+		artist, err := GetArtist(db, lib.ArtistsGetParams{Name: utils.Ptr(artistName)})
+		if err != nil {
+			if errors.Is(err, ErrArtistNotFound) {
+				artistInput := &lib.Artist{Name: artistName}
+				artist, err = SaveArtist(db, artistInput)
+				if err != nil {
+					return 0, err
+				}
+			} else {
+				return 0, err
+			}
+		}
+		id = artist.ID
+		if ct.ArtistCache != nil {
+			ct.ArtistCache[GetArtistKey(artistName)] = id
+		}
+	}
+	return id, nil
+}
+
+func GetAlbumKey(artistName string, albumName string) string {
+	return strings.ToLower(artistName + "|" + albumName)
+}
+
+func GetOrAddAlbum(db DBTX, artistID int, track *lib.Track) (int, error) {
+	ct := lib.GetImportContext()
+	id, ok := ct.AlbumCache[GetAlbumKey(track.Artist, track.Album)]
+	if !ok {
+		album, err := GetAlbum(db, lib.AlbumsGetParams{
+			ArtistID: utils.Ptr(artistID), Title: utils.Ptr(track.Album),
+		})
+		if err != nil {
+			if errors.Is(err, ErrAlbumNotFound) {
+				artistInput := &lib.Album{
+					ID:       track.ID,
+					ArtistID: artistID,
+					Title:    track.Album,
+					Year:     track.Year,
+				}
+				album, err = SaveAlbum(db, artistInput)
+				if err != nil {
+					return 0, err
+				}
+			} else {
+				return 0, err
+			}
+		}
+		id = album.ID
+		if ct.AlbumCache != nil {
+			ct.AlbumCache[GetAlbumKey(track.Artist, track.Album)] = id
+		}
+	}
+	return id, nil
+}
+
+func SaveTrackWithRelations(db DBTX, dirID int, track *lib.Track) (*lib.Track, error) {
+	albumArtist := utils.FirstNonEmpty(
+		track.AlbumArtist,
+		track.Artist,
+		"Unknown Artist",
+	)
+	albumArtistID, err := GetOrAddArtist(db, albumArtist)
+	if err != nil {
+		return nil, err
+	}
+	albumID, err := GetOrAddAlbum(db, albumArtistID, track)
+	if err != nil {
+		return nil, err
+	}
+	track.AlbumID = albumID
+
+	trackArtist := utils.FirstNonEmpty(
+		track.Artist,
+		track.AlbumArtist,
+		"Unknown Artist",
+	)
+	artistID, err := GetOrAddArtist(db, trackArtist)
+	if err != nil {
+		return nil, err
+	}
+	return SaveTrack(db, dirID, artistID, track)
+}
+
 func SaveTrack(db DBTX, dirID int, artistID int, track *lib.Track) (*lib.Track, error) {
 	err := db.QueryRow(`
 		INSERT INTO tracks (
@@ -303,6 +394,21 @@ func SaveTrack(db DBTX, dirID int, artistID int, track *lib.Track) (*lib.Track, 
 		return nil, err
 	}
 	return track, nil
+}
+
+func SaveImage(db DBTX, dirID int, img *lib.DirectoryImage) (*lib.DirectoryImage, error) {
+	err := db.QueryRow(`
+		INSERT INTO directory_images (
+			directory_id, path, type, format, sort_order, width, height, size, mtime
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		RETURNING id`,
+		dirID, img.Path, img.Type, img.Format, img.Order, img.Width, img.Height, img.Size, img.Mtime,
+	).Scan(&img.ID)
+	if err != nil {
+		return nil, err
+	}
+	return img, nil
 }
 
 var ErrTrackNotFound = errors.New("track not found")

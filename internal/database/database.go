@@ -100,9 +100,7 @@ func initDatabase(db DBTX) {
 				year INTEGER,
 
 				FOREIGN KEY (artist_id)
-				REFERENCES artists(id),
-
-				UNIQUE(artist_id, title)
+				REFERENCES artists(id)
 				);
 
 				CREATE TABLE directories (
@@ -141,6 +139,22 @@ func initDatabase(db DBTX) {
 				REFERENCES directories(id),
 				FOREIGN KEY (artist_id)
 				REFERENCES artists(id)
+				);
+
+				CREATE TABLE directory_images (
+				id INTEGER PRIMARY KEY,
+				directory_id INTEGER NOT NULL,
+				path TEXT NOT NULL,
+				type INTEGER NOT NULL,
+				format TEXT NOT NULL,
+				sort_order INTEGER,
+				width INTEGER,
+				height INTEGER,
+				size INTEGER,
+				mtime INTEGER,
+				FOREIGN KEY (directory_id)
+				REFERENCES directories(id),
+				UNIQUE(directory_id, path)
 				);
 				`)
 			if err != nil {

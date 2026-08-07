@@ -7,7 +7,8 @@ require (
 	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
 	github.com/gorilla/websocket v1.5.3
 	github.com/joho/godotenv v1.5.1
-	golang.org/x/text v0.38.0
+	golang.org/x/image v0.44.0
+	golang.org/x/text v0.40.0
 	modernc.org/sqlite v1.52.0
 )
 

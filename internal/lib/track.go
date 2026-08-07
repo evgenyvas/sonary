@@ -132,3 +132,37 @@ func (params *ConvertParams) ToString() string {
 	}
 	return params.Format + "_" + params.Mode + "_" + params.Quality + "_" + pr
 }
+
+type ImageType int
+
+const (
+	ImageTypeMainFront ImageType = iota
+	ImageTypeFront
+	ImageTypeBack
+	ImageTypeDisc
+	ImageTypeBooklet
+	ImageTypeInlay
+	ImageTypeInside
+	ImageTypeDigipack
+	ImageTypeSlipcase
+	ImageTypeOther
+)
+
+type DirectoryImage struct {
+	ID          int
+	DirectoryID int
+	Path        string
+	FullPath    string
+	Type        ImageType
+	Format      string
+	Order       int
+	Width       int
+	Height      int
+	Size        int64
+	Mtime       int64
+}
+
+type ImageConfig struct {
+	Width, Height int
+	Format        string
+}

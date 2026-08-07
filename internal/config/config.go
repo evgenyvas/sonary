@@ -21,6 +21,7 @@ type Config struct {
 	IsWsl        bool     `env:"WSL"`
 	FoobarAPI    bool     `env:"FOOBAR_API"`
 	FoobarAPIUrl string   `env:"FOOBAR_API_URL"`
+	CacheDir     string   `env:"CACHE_DIR"`
 }
 
 var instance *Config
