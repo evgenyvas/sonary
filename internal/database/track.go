@@ -759,6 +759,16 @@ func GetArtists(db DBTX, params lib.ArtistsGetParams) ([]lib.ArtistDB, bool, err
 	if params.ID != nil {
 		conditions = append(conditions, "id = ?")
 		args = append(args, *params.ID)
+	} else if len(params.IDs) > 0 {
+		placeholders := make([]string, len(params.IDs))
+		for i, id := range params.IDs {
+			placeholders[i] = "?"
+			args = append(args, id)
+		}
+		conditions = append(
+			conditions,
+			"id IN ("+strings.Join(placeholders, ", ")+")",
+		)
 	} else {
 		if params.Name != nil {
 			conditions = append(conditions, "name = ?")

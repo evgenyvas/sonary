@@ -29,7 +29,9 @@ export class ArtistsView extends SonaryLitElement {
 
     connectedCallback() {
         super.connectedCallback()
+    }
 
+    _loadItems() {
         this._isLoading = true
         this.store.dispatch(setProgressIndeterminate(true))
         store.dispatch(fetchArtist(<number>this.artistId)).then(() => {
@@ -48,7 +50,13 @@ export class ArtistsView extends SonaryLitElement {
         if (changedProperties.has('artistId')) {
             this._hasAlbums = false
             this._hasTracks = false
+            this._loadItems()
         }
+    }
+
+    private get hasRelated(): boolean {
+        return this.storeState.artists.selectedItem?.related != undefined &&
+            this.storeState.artists.selectedItem?.related.length > 0
     }
 
     render() {
@@ -68,6 +76,10 @@ export class ArtistsView extends SonaryLitElement {
     <sonary-tracks-list .baseRoute="${this.baseRoute}" .mode=${fetchTracksMode.NoAlbum} .artistId=${this.artistId} limit="0"
         @tracks-empty="${() => this._hasTracks = false}"
         @tracks-loaded="${() => this._hasTracks = true}"></sonary-tracks-list>
+  </div>
+  <div class="${classMap({ 'wa-visually-hidden': !this.hasRelated })}">
+    <b>See also</b>
+    <sonary-artists-list .baseRoute="${import.meta.env.VITE_BASE_APP_ROUTE}" .relatedArtistId=${this._selectedItem?.id}></sonary-artists-list>
   </div>
 </div>
 `

@@ -16,6 +16,10 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"golang.org/x/text/encoding"
+	"golang.org/x/text/encoding/charmap"
 )
 
 const sideFileName = "Side.txt"
@@ -351,6 +355,22 @@ func (s *DirectoryScanner) processSideFile() error {
 		data, err := os.ReadFile(sidePath)
 		if err != nil {
 			return err
+		}
+		if !utf8.Valid(data) {
+			encodings := []encoding.Encoding{
+				charmap.Windows1251,
+				charmap.Windows1252,
+				charmap.CodePage866,
+				charmap.KOI8R,
+			}
+			for _, enc := range encodings {
+				decoded, err := enc.NewDecoder().Bytes(data)
+				if err != nil {
+					continue
+				}
+				data = decoded
+				break
+			}
 		}
 
 		lines := strings.Split(string(data), "\n")

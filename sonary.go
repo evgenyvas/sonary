@@ -231,12 +231,31 @@ func (api *API) GetArtist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	relatedArtistsIDs, err := database.GetRelatedArtists(api.readDB, artist.ID, database.RelationBoth)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var apiRelatedArtists []lib.APIArtist
+	if len(relatedArtistsIDs) > 0 {
+		relatedArtists, _, err := database.GetArtists(api.readDB, lib.ArtistsGetParams{IDs: relatedArtistsIDs})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		for _, a := range relatedArtists {
+			apiRelatedArtists = append(apiRelatedArtists, a.ToAPI())
+		}
+	}
+
 	apiArtist := lib.APIArtistSingle{
 		APIStatus: lib.APIStatus{
 			Status:  http.StatusOK,
 			Message: "ok",
 		},
-		APIArtist: artist.ToAPI(),
+		APIArtist:      artist.ToAPI(),
+		RelatedArtists: apiRelatedArtists,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

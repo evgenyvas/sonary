@@ -108,6 +108,7 @@ type TrackUpdateParams struct {
 
 type ArtistsGetParams struct {
 	ID    *int
+	IDs   []int
 	Name  *string
 	Limit int
 	Page  *int

@@ -329,6 +329,7 @@ func DecodeCue(data []byte) string {
 
 	encodings := []encoding.Encoding{
 		charmap.Windows1251,
+		charmap.Windows1252,
 		charmap.CodePage866,
 		charmap.KOI8R,
 	}

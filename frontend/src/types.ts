@@ -1,6 +1,12 @@
+interface RelatedArtist {
+    id: number,
+    name: string,
+}
+
 export interface Artist {
     id: number,
     name: string,
+    related: RelatedArtist[]
 }
 
 export interface Album {

@@ -99,6 +99,7 @@ type APIArtist struct {
 type APIArtistSingle struct {
 	APIStatus
 	APIArtist
+	RelatedArtists []APIArtist `json:"related"`
 }
 
 type APIArtistList struct {

@@ -29,8 +29,18 @@ const initialStateTrack = {
     selectedItem: <Track | null>null,
 }
 
+export interface ArtistsQuery {
+    relatedArtistId?: number
+}
+
+export function getArtistsKey(query: ArtistsQuery): string {
+    return [
+        query.relatedArtistId ?? '-',
+    ].join(':')
+}
+
 const initialStateArtist = {
-    isInitList: <boolean>false,
+    currentKey: <string>'',
     items: <Artist[]>[],
     hasNext: <boolean>false,
     selectedItem: <Artist | null>null,
@@ -65,6 +75,7 @@ const SET_PROGRESS: string = 'SET_PROGRESS'
 const SET_PROGRESS_INDETERMINATE: string = 'SET_PROGRESS_INDETERMINATE'
 const DELETE_ITEM: string = 'DELETE_ITEM'
 
+const SET_CURRENT_ARTISTS_KEY: string = 'SET_CURRENT_ARTISTS_KEY'
 const SET_ARTIST_ITEMS: string = 'SET_ARTIST_ITEMS'
 const APPEND_ARTIST_ITEMS: string = 'APPEND_ARTIST_ITEMS'
 const SET_ARTIST_ITEM: string = 'SET_ARTIST_ITEM'
@@ -135,6 +146,13 @@ export const setProgressIndeterminate = (payload: boolean) => {
 export const deleteItem = (payload: number) => {
     return {
         type: DELETE_ITEM,
+        payload
+    }
+}
+
+export const setCurrentArtistsKey = (payload: string) => {
+    return {
+        type: SET_CURRENT_ARTISTS_KEY,
         payload
     }
 }
@@ -242,6 +260,9 @@ const tracksSlice = (state = initialStateTrack, action: any) => {
 
 const artistsSlice = (state = initialStateArtist, action: any) => {
     switch (action.type) {
+        case SET_CURRENT_ARTISTS_KEY:
+            state.currentKey = action.payload
+            break
         case SET_ARTIST_ITEMS:
             state.items = action.payload
             break
@@ -387,7 +408,14 @@ export const fetchArtist = (artistId: number): any => {
         return httpClient('/v1/artists/' + artistId, {
             method: 'GET',
         })
-            .then(response => dispatch(setArtistItem(response)))
+            .then(response => {
+                dispatch(setArtistItem(response))
+                dispatch(setArtistItems(response.related))
+                dispatch(setArtistHasNext(false))
+                dispatch(setCurrentArtistsKey(getArtistsKey({
+                    relatedArtistId: artistId,
+                })))
+            })
     }
 }
 
