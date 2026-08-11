@@ -92,6 +92,21 @@ func initDatabase(db DBTX) {
 				name TEXT NOT NULL UNIQUE
 				);
 
+				CREATE TABLE artist_relations (
+				artist_id INTEGER NOT NULL,
+				related_artist_id INTEGER NOT NULL,
+
+				PRIMARY KEY (artist_id, related_artist_id),
+
+				FOREIGN KEY (artist_id)
+				REFERENCES artists(id)
+				ON DELETE CASCADE,
+
+				FOREIGN KEY (related_artist_id)
+				REFERENCES artists(id)
+				ON DELETE CASCADE
+				);
+
 				CREATE TABLE albums (
 				id INTEGER PRIMARY KEY,
 				artist_id INTEGER NOT NULL,
@@ -107,7 +122,9 @@ func initDatabase(db DBTX) {
 				id INTEGER PRIMARY KEY,
 				path TEXT UNIQUE,
 				mtime INTEGER,
-				last_scan INTEGER
+				last_scan INTEGER,
+				side_exists BOOLEAN NOT NULL DEFAULT 0,
+				side_mtime INTEGER NOT NULL DEFAULT 0
 				);
 
 				CREATE TABLE tracks (
@@ -141,9 +158,10 @@ func initDatabase(db DBTX) {
 				REFERENCES artists(id)
 				);
 
-				CREATE TABLE directory_images (
+				CREATE TABLE images (
 				id INTEGER PRIMARY KEY,
 				directory_id INTEGER NOT NULL,
+				artist_id INTEGER,
 				path TEXT NOT NULL,
 				type INTEGER NOT NULL,
 				format TEXT NOT NULL,
@@ -154,6 +172,8 @@ func initDatabase(db DBTX) {
 				mtime INTEGER,
 				FOREIGN KEY (directory_id)
 				REFERENCES directories(id),
+				FOREIGN KEY (artist_id)
+				REFERENCES artists(id),
 				UNIQUE(directory_id, path)
 				);
 				`)

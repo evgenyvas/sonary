@@ -40,15 +40,19 @@ type Track struct {
 }
 
 type DirScan struct {
-	Mtime    int64
-	LastScan int64
+	Mtime      int64
+	LastScan   int64
+	SideExists bool
+	SideMtime  int64
 }
 
 type DirDB struct {
-	ID       int
-	Path     string
-	Mtime    int64
-	LastScan int64
+	ID         int
+	Path       string
+	Mtime      int64
+	LastScan   int64
+	SideExists bool
+	SideMtime  int64
 }
 
 type ArtistDB struct {
@@ -136,7 +140,8 @@ func (params *ConvertParams) ToString() string {
 type ImageType int
 
 const (
-	ImageTypeMainFront ImageType = iota
+	ImageTypeArtistLogo ImageType = iota
+	ImageTypeMainFront
 	ImageTypeFront
 	ImageTypeBack
 	ImageTypeDisc
@@ -148,9 +153,10 @@ const (
 	ImageTypeOther
 )
 
-type DirectoryImage struct {
+type Image struct {
 	ID          int
 	DirectoryID int
+	ArtistID    *int
 	Path        string
 	FullPath    string
 	Type        ImageType
@@ -166,3 +172,11 @@ type ImageConfig struct {
 	Width, Height int
 	Format        string
 }
+
+type ScanFileType int
+
+const (
+	ScanFileTypeSide ScanFileType = iota
+	ScanFileTypeLogo
+	ScanFileTypeAudio
+)

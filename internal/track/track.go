@@ -13,61 +13,83 @@ import (
 	"sonary/internal/database"
 	"sonary/internal/ffmpeg"
 	"sonary/internal/lib"
+	"sort"
 	"strings"
 	"time"
 )
+
+const sideFileName = "Side.txt"
+
+func checkRelevantFile(name string) (bool, lib.ScanFileType) {
+	if strings.EqualFold(name, sideFileName) {
+		return true, lib.ScanFileTypeSide
+	}
+	if isArtistLogo(name) {
+		return true, lib.ScanFileTypeLogo
+	}
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".cue", ".mp3", ".flac", ".ogg", ".m4a", ".ape", ".wav",
+		".jpg", ".jpeg", ".png":
+		return true, lib.ScanFileTypeAudio
+	}
+	return false, 0
+}
 
 func SyncDirectories() (map[string]any, error) {
 	writeDB := database.Writer()
 	cfg := config.GetConfig()
 
 	// At first - search for music dirs and sync them with database
-	var musicDirs = map[string]lib.DirScan{}
+	var scanDirs = map[string]lib.DirScan{}
 	for _, root := range cfg.RootPaths {
 		log.Printf("Starting to read root directory '%s'\n", root)
-		filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
 			if d.IsDir() {
 				return nil
 			}
+			ok, fileType := checkRelevantFile(d.Name())
+			if !ok {
+				return nil
+			}
+			dirPath := filepath.Dir(path)
 
-			ext := strings.ToLower(filepath.Ext(path))
+			// mtime max for files inside
+			fileInfo, err := os.Stat(path)
+			if err != nil {
+				log.Printf("Loading file state error: %v", err)
+				return err
+			}
+			fileMtime := fileInfo.ModTime().Unix()
 
-			switch ext {
-			case ".cue", ".mp3", ".flac", ".ogg", ".m4a", ".ape", ".wav":
-				dirPath := filepath.Dir(path)
-				if dir, ok := musicDirs[dirPath]; ok {
-					// mtime max for files inside
-					fileInfo, err := os.Stat(path)
-					if err != nil {
-						log.Printf("Loading file state error: %v", err)
-						return err
-					}
-					fileMtime := fileInfo.ModTime().Unix()
-					if fileMtime > dir.Mtime {
-						musicDirs[dirPath] = lib.DirScan{
-							Mtime:    fileMtime,
-							LastScan: 0,
-						}
-					}
-				} else {
-					dirInfo, err := os.Stat(dirPath)
-					if err != nil {
-						log.Printf("Loading directory state error: %v", err)
-						return err
-					}
-					// Skip the root directory itself (which evaluates to ".")
-					if dirPath == "." {
-						return nil
-					}
-					musicDirs[dirPath] = lib.DirScan{
-						Mtime:    dirInfo.ModTime().Unix(),
-						LastScan: 0,
-					}
+			if dir, ok := scanDirs[dirPath]; ok {
+				if fileType == lib.ScanFileTypeSide {
+					dir.SideExists = true
+				}
+				// mtime max for files inside
+				if fileMtime > dir.Mtime {
+					dir.Mtime = fileMtime
+					dir.LastScan = 0
+				}
+				scanDirs[dirPath] = dir
+			} else {
+				// Skip the root directory itself (which evaluates to ".")
+				if dirPath == "." {
+					return nil
+				}
+				scanDirs[dirPath] = lib.DirScan{
+					Mtime:      fileMtime,
+					LastScan:   0,
+					SideExists: fileType == lib.ScanFileTypeSide,
 				}
 			}
-
 			return nil
 		})
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	dirExists, err := database.GetDirectories(writeDB)
@@ -80,20 +102,21 @@ func SyncDirectories() (map[string]any, error) {
 	var dirsUpdate = map[string]lib.DirDB{}
 	// compare dirs with dirs from db
 	for path, dirDB := range dirExists {
-		if dir, ok := musicDirs[path]; ok {
-			if dirDB.Mtime != dir.Mtime {
+		if dir, ok := scanDirs[path]; ok {
+			if dirDB.Mtime != dir.Mtime || dirDB.SideExists != dir.SideExists {
 				dirDB.Mtime = dir.Mtime
+				dirDB.SideExists = dir.SideExists
 				dirsUpdate[path] = dirDB
 			}
-			delete(musicDirs, path)
+			delete(scanDirs, path)
 			delete(dirExists, path)
 		}
 	}
 
 	// new dirs
-	if len(musicDirs) > 0 {
-		log.Printf("to add: %d\n", len(musicDirs))
-		if err := database.SaveDirectories(writeDB, musicDirs); err != nil {
+	if len(scanDirs) > 0 {
+		log.Printf("to add: %d\n", len(scanDirs))
+		if err := database.SaveDirectories(writeDB, scanDirs); err != nil {
 			return nil, err
 		}
 	}
@@ -101,7 +124,7 @@ func SyncDirectories() (map[string]any, error) {
 	// modified dirs - update mtime
 	if len(dirsUpdate) > 0 {
 		log.Printf("to update: %d\n", len(dirsUpdate))
-		if err := database.UpdateDirectoriesMtime(writeDB, dirsUpdate); err != nil {
+		if err := database.UpdateDirectories(writeDB, dirsUpdate); err != nil {
 			return nil, err
 		}
 	}
@@ -117,8 +140,8 @@ func SyncDirectories() (map[string]any, error) {
 	log.Println("Directory sync complete.")
 
 	return map[string]any{
-		"num":    len(musicDirs) + len(dirsUpdate),
-		"add":    len(musicDirs),
+		"num":    len(scanDirs) + len(dirsUpdate),
+		"add":    len(scanDirs),
 		"update": len(dirsUpdate),
 		"delete": len(dirExists),
 	}, nil
@@ -137,10 +160,11 @@ type DirectoryScanner struct {
 	Entries        []os.DirEntry
 	FF             *ffmpeg.FFmpeg
 	SkipFiles      map[string]struct{}
-	Images         []lib.DirectoryImage
+	Images         []lib.Image
 	ImageOrder     int
 	Thumbnails     ThumbnailGenerator
 	MainFrontFound bool
+	ArtistID       *int
 }
 
 func NewDirectoryScanner(path string) (*DirectoryScanner, error) {
@@ -258,20 +282,174 @@ func (s *DirectoryScanner) saveTracks(tracks []*lib.Track) error {
 	defer tx.Rollback()
 
 	for _, track := range tracks {
-		_, err = database.SaveTrackWithRelations(tx, s.Dir.ID, track)
+		_, albumArtistID, _, _, err := database.SaveTrackWithRelations(tx, s.Dir.ID, track)
 		if err != nil {
 			return err
 		}
-	}
-
-	if err = database.UpdateDirectoryLastScan(tx, s.Dir.ID); err != nil {
-		return err
+		if s.ArtistID == nil {
+			s.ArtistID = &albumArtistID
+		}
 	}
 
 	if err = tx.Commit(); err != nil {
 		return err
 	}
 	log.Printf("Tracks saved successfully '%s'\n", s.Path)
+	return nil
+}
+
+// artist relations
+func (s *DirectoryScanner) processSideFile() error {
+	var sidePath string
+	var currentSideMtime int64
+
+	for _, entry := range s.Entries {
+		if entry.IsDir() {
+			continue
+		}
+		if strings.EqualFold(entry.Name(), sideFileName) {
+			sidePath = filepath.Join(s.Path, entry.Name())
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			currentSideMtime = info.ModTime().Unix()
+			break
+		}
+	}
+
+	// Side.txt has not changed since the last time it was processed
+	if currentSideMtime == s.Dir.SideMtime {
+		return nil
+	}
+
+	artistName := filepath.Base(s.Path)
+
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	artistID, err := database.GetOrAddArtist(tx, artistName)
+	if err != nil {
+		return err
+	}
+
+	// get connections artist -> related_artist
+	oldRelatedIDs, err := database.GetRelatedArtists(tx, artistID, database.RelationRelated)
+	if err != nil {
+		return err
+	}
+
+	// if Side.txt exists, we read it
+	// if the file doesn't exist, newRelatedIDs will remain empty,
+	// meaning all existing relationships are deleted
+	var newRelatedIDs []int
+
+	if sidePath != "" {
+		data, err := os.ReadFile(sidePath)
+		if err != nil {
+			return err
+		}
+
+		lines := strings.Split(string(data), "\n")
+
+		newRelatedSet := make(map[int]struct{})
+
+		for _, line := range lines {
+			relatedName := strings.TrimSpace(line)
+			if relatedName == "" {
+				continue
+			}
+			if strings.EqualFold(artistName, relatedName) {
+				continue
+			}
+			relatedID, err := database.GetOrAddArtist(tx, relatedName)
+			if err != nil {
+				return err
+			}
+			newRelatedSet[relatedID] = struct{}{}
+		}
+
+		newRelatedIDs = make([]int, 0, len(newRelatedSet))
+		for relatedID := range newRelatedSet {
+			newRelatedIDs = append(newRelatedIDs, relatedID)
+		}
+
+		sort.Ints(newRelatedIDs)
+	}
+
+	// create a set of existing connections
+	oldSet := make(map[int]struct{}, len(oldRelatedIDs))
+	for _, relatedID := range oldRelatedIDs {
+		oldSet[relatedID] = struct{}{}
+	}
+
+	// create a set of new connections
+	newSet := make(map[int]struct{}, len(newRelatedIDs))
+	for _, relatedID := range newRelatedIDs {
+		newSet[relatedID] = struct{}{}
+	}
+
+	isChanged := false
+
+	// remove links that no longer exist in Side.txt
+	for _, relatedID := range oldRelatedIDs {
+		if _, exists := newSet[relatedID]; exists {
+			continue
+		}
+		if err := database.DeleteArtistRelation(tx, artistID, relatedID); err != nil {
+			return err
+		}
+
+		isChanged = true
+
+		log.Printf("Artist relation removed: '%s' -> artist_id=%d\n", artistName, relatedID)
+	}
+
+	// adding new connections
+	for _, relatedID := range newRelatedIDs {
+		if _, exists := oldSet[relatedID]; exists {
+			continue
+		}
+		if err := database.SaveArtistRelation(tx, artistID, relatedID); err != nil {
+			return err
+		}
+
+		isChanged = true
+
+		log.Printf("Artist relation saved: '%s' -> artist_id=%d\n", artistName, relatedID)
+	}
+
+	if err := database.UpdateDirectorySideMtime(tx, s.Dir.ID, currentSideMtime); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	log.Printf("Side.txt processed: artist '%s', changed=%v\n", artistName, isChanged)
+
+	return nil
+}
+
+func (s *DirectoryScanner) markScanned() error {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := database.UpdateDirectoryLastScan(tx, s.Dir.ID); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -297,8 +475,18 @@ func ScanTracksInDir(path string) error {
 		return err
 	}
 
+	// artist relations
+	if err := scanner.processSideFile(); err != nil {
+		log.Printf("scan side file error: %v", err)
+		return err
+	}
+
 	if err := scanner.processImages(); err != nil {
 		log.Printf("scan images error: %v", err)
+		return err
+	}
+
+	if err := scanner.markScanned(); err != nil {
 		return err
 	}
 

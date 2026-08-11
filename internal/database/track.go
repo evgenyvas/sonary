@@ -17,7 +17,7 @@ const batchSize = 500
 
 func GetDirectories(db DBTX) (map[string]lib.DirDB, error) {
 	query := `
-		SELECT id, path, mtime, last_scan
+		SELECT id, path, mtime, last_scan, side_exists, side_mtime
 		FROM directories
 	`
 
@@ -31,7 +31,8 @@ func GetDirectories(db DBTX) (map[string]lib.DirDB, error) {
 
 	for rows.Next() {
 		var d lib.DirDB
-		err := rows.Scan(&d.ID, &d.Path, &d.Mtime, &d.LastScan)
+		err := rows.Scan(&d.ID, &d.Path, &d.Mtime, &d.LastScan,
+			&d.SideExists, &d.SideMtime)
 		if err != nil {
 			return nil, err
 		}
@@ -43,13 +44,14 @@ func GetDirectories(db DBTX) (map[string]lib.DirDB, error) {
 
 func GetDirectory(db DBTX, path string) (*lib.DirDB, error) {
 	query := `
-		SELECT id, mtime, last_scan
+		SELECT id, mtime, last_scan, side_exists, side_mtime
 		FROM directories WHERE path = ?
 	`
 
 	dir := &lib.DirDB{Path: path}
 
-	err := db.QueryRow(query, path).Scan(&dir.ID, &dir.Mtime, &dir.LastScan)
+	err := db.QueryRow(query, path).Scan(&dir.ID, &dir.Mtime, &dir.LastScan,
+		&dir.SideExists, &dir.SideMtime)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
@@ -67,16 +69,18 @@ func SaveDirectories(db *sql.DB, dirs map[string]lib.DirScan) error {
 			return err
 		}
 
-		stmt, err := tx.Prepare(
-			"INSERT INTO directories (path, mtime, last_scan) VALUES (?, ?, ?)",
-		)
+		stmt, err := tx.Prepare(`
+			INSERT INTO directories (path, mtime, last_scan, side_exists, side_mtime)
+			VALUES (?, ?, ?, ?, ?)
+		`)
 		if err != nil {
 			tx.Rollback()
 			return err
 		}
 
 		for dir, dirScan := range chunk {
-			_, err := stmt.Exec(dir, dirScan.Mtime, dirScan.LastScan)
+			_, err := stmt.Exec(dir, dirScan.Mtime, dirScan.LastScan,
+				dirScan.SideExists, dirScan.SideMtime)
 			if err != nil {
 				stmt.Close()
 				tx.Rollback()
@@ -98,15 +102,16 @@ func SaveDirectories(db *sql.DB, dirs map[string]lib.DirScan) error {
 	return nil
 }
 
-func UpdateDirectoriesMtime(db *sql.DB, dirs map[string]lib.DirDB) error {
+func UpdateDirectories(db *sql.DB, dirs map[string]lib.DirDB) error {
 	for _, chunk := range utils.ChunkMap(dirs, batchSize) {
 		tx, err := db.BeginTx(context.Background(), nil)
 		if err != nil {
 			return err
 		}
 
+		// last_scan = 0 so directory will be rescanned
 		stmt, err := tx.Prepare(
-			"UPDATE directories SET mtime = ?, last_scan = 0 WHERE id = ?",
+			"UPDATE directories SET mtime = ?, last_scan = 0, side_exists = ? WHERE id = ?",
 		)
 		if err != nil {
 			tx.Rollback()
@@ -114,7 +119,7 @@ func UpdateDirectoriesMtime(db *sql.DB, dirs map[string]lib.DirDB) error {
 		}
 
 		for _, dirDB := range chunk {
-			res, err := stmt.Exec(dirDB.Mtime, dirDB.ID)
+			res, err := stmt.Exec(dirDB.Mtime, dirDB.SideExists, dirDB.ID)
 			if err != nil {
 				stmt.Close()
 				tx.Rollback()
@@ -148,6 +153,25 @@ func UpdateDirectoryLastScan(db DBTX, dirID int) error {
 		dateNow, dirID)
 	if err != nil {
 		return fmt.Errorf("update directory last_scan: %w", err)
+	}
+
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("get affected rows: %w", err)
+	}
+	if n == 0 {
+		return ErrDirectoryNotFound
+	}
+
+	return nil
+}
+
+func UpdateDirectorySideMtime(db DBTX, dirID int, sideMtime int64) error {
+	res, err := db.Exec(
+		`UPDATE directories SET side_mtime = ? WHERE id = ?`,
+		sideMtime, dirID)
+	if err != nil {
+		return fmt.Errorf("update directory side_mtime: %w", err)
 	}
 
 	n, err := res.RowsAffected()
@@ -269,6 +293,100 @@ func SaveArtist(db DBTX, artistInput *lib.Artist) (*lib.ArtistDB, error) {
 	return artist, nil
 }
 
+type RelationDirection int
+
+const (
+	RelationBoth RelationDirection = iota
+	RelationRelated
+	RelationArtist
+)
+
+func GetRelatedArtists(db DBTX, artistID int, direction RelationDirection) ([]int, error) {
+	var query string
+	var args []any
+
+	switch direction {
+	case RelationRelated:
+		query = `
+			SELECT related_artist_id
+			FROM artist_relations
+			WHERE artist_id = ?
+			ORDER BY related_artist_id
+		`
+		args = []any{artistID}
+
+	case RelationArtist:
+		query = `
+			SELECT artist_id
+			FROM artist_relations
+			WHERE related_artist_id = ?
+			ORDER BY artist_id
+		`
+		args = []any{artistID}
+
+	case RelationBoth:
+		query = `
+			SELECT related_artist_id AS artist_id
+			FROM artist_relations
+			WHERE artist_id = ?
+
+			UNION
+
+			SELECT artist_id
+			FROM artist_relations
+			WHERE related_artist_id = ?
+
+			ORDER BY artist_id
+		`
+		args = []any{artistID, artistID}
+
+	default:
+		return nil, fmt.Errorf("unknown relation direction: %d", direction)
+	}
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var artistIDs []int
+
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+
+		artistIDs = append(artistIDs, id)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return artistIDs, nil
+}
+
+func SaveArtistRelation(db DBTX, artistID, relatedArtistID int) error {
+	_, err := db.Exec(`
+		INSERT OR IGNORE INTO artist_relations
+			(artist_id, related_artist_id)
+		VALUES (?, ?)
+	`, artistID, relatedArtistID)
+
+	return err
+}
+
+func DeleteArtistRelation(db DBTX, artistID, relatedArtistID int) error {
+	_, err := db.Exec(`
+		DELETE FROM artist_relations
+		WHERE artist_id = ? AND related_artist_id = ?
+	`, artistID, relatedArtistID)
+
+	return err
+}
+
 func SaveAlbum(db DBTX, albumInput *lib.Album) (*lib.AlbumDB, error) {
 	album := &lib.AlbumDB{}
 
@@ -349,7 +467,7 @@ func GetOrAddAlbum(db DBTX, artistID int, track *lib.Track) (int, error) {
 	return id, nil
 }
 
-func SaveTrackWithRelations(db DBTX, dirID int, track *lib.Track) (*lib.Track, error) {
+func SaveTrackWithRelations(db DBTX, dirID int, track *lib.Track) (int, int, int, *lib.Track, error) {
 	albumArtist := utils.FirstNonEmpty(
 		track.AlbumArtist,
 		track.Artist,
@@ -357,11 +475,11 @@ func SaveTrackWithRelations(db DBTX, dirID int, track *lib.Track) (*lib.Track, e
 	)
 	albumArtistID, err := GetOrAddArtist(db, albumArtist)
 	if err != nil {
-		return nil, err
+		return 0, 0, 0, nil, err
 	}
 	albumID, err := GetOrAddAlbum(db, albumArtistID, track)
 	if err != nil {
-		return nil, err
+		return 0, 0, 0, nil, err
 	}
 	track.AlbumID = albumID
 
@@ -372,9 +490,10 @@ func SaveTrackWithRelations(db DBTX, dirID int, track *lib.Track) (*lib.Track, e
 	)
 	artistID, err := GetOrAddArtist(db, trackArtist)
 	if err != nil {
-		return nil, err
+		return 0, 0, 0, nil, err
 	}
-	return SaveTrack(db, dirID, artistID, track)
+	t, err := SaveTrack(db, dirID, artistID, track)
+	return albumID, albumArtistID, artistID, t, err
 }
 
 func SaveTrack(db DBTX, dirID int, artistID int, track *lib.Track) (*lib.Track, error) {
@@ -396,19 +515,67 @@ func SaveTrack(db DBTX, dirID int, artistID int, track *lib.Track) (*lib.Track, 
 	return track, nil
 }
 
-func SaveImage(db DBTX, dirID int, img *lib.DirectoryImage) (*lib.DirectoryImage, error) {
+func SaveImage(db DBTX, dirID int, img *lib.Image) (*lib.Image, error) {
 	err := db.QueryRow(`
-		INSERT INTO directory_images (
-			directory_id, path, type, format, sort_order, width, height, size, mtime
+		INSERT INTO images (
+			directory_id, artist_id, path, type, format, sort_order, width, height, size, mtime
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		RETURNING id`,
-		dirID, img.Path, img.Type, img.Format, img.Order, img.Width, img.Height, img.Size, img.Mtime,
+		dirID, img.ArtistID, img.Path, img.Type, img.Format, img.Order, img.Width, img.Height, img.Size, img.Mtime,
 	).Scan(&img.ID)
 	if err != nil {
 		return nil, err
 	}
 	return img, nil
+}
+
+func GetImagesByDirectory(db DBTX, dirID int) ([]lib.Image, error) {
+	rows, err := db.Query(`
+		SELECT id, directory_id, artist_id, path, type, format,
+		sort_order, width, height, size, mtime
+		FROM images
+		WHERE directory_id = ?
+	`, dirID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var images []lib.Image
+
+	for rows.Next() {
+		var img lib.Image
+
+		if err := rows.Scan(
+			&img.ID,
+			&img.DirectoryID,
+			&img.ArtistID,
+			&img.Path,
+			&img.Type,
+			&img.Format,
+			&img.Order,
+			&img.Width,
+			&img.Height,
+			&img.Size,
+			&img.Mtime,
+		); err != nil {
+			return nil, err
+		}
+
+		images = append(images, img)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return images, nil
+}
+
+func DeleteImage(db DBTX, imageID int) error {
+	_, err := db.Exec(`DELETE FROM images WHERE id = ?`, imageID)
+	return err
 }
 
 var ErrTrackNotFound = errors.New("track not found")

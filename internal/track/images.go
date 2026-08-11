@@ -6,7 +6,6 @@ import (
 	"image"
 	"image/jpeg"
 	_ "image/png"
-	"io"
 	"io/fs"
 	"log"
 	"os"
@@ -47,6 +46,21 @@ var imageKeywords = []ImageKeyword{
 	{"slip", lib.ImageTypeSlipcase},
 }
 
+func isArtistLogo(name string) bool {
+	n := strings.ToLower(name)
+
+	if !strings.HasPrefix(n, "logo") {
+		return false
+	}
+
+	switch filepath.Ext(n) {
+	case ".jpg", ".jpeg", ".png":
+		return true
+	}
+
+	return false
+}
+
 func (s *DirectoryScanner) processImages() error {
 	for _, entry := range s.Entries {
 		if entry.IsDir() {
@@ -64,10 +78,7 @@ func (s *DirectoryScanner) processImages() error {
 						if err != nil {
 							return err
 						}
-						if err := s.checkImage(entry, relImgPath, false); err != nil {
-							return err
-						}
-						return nil
+						return s.checkImage(entry, relImgPath, true)
 					})
 				if err != nil {
 					log.Printf("Error walking path: '%s': %v\n", s.Path, err)
@@ -76,18 +87,12 @@ func (s *DirectoryScanner) processImages() error {
 			}
 			continue
 		}
-		if err := s.checkImage(entry, entry.Name(), true); err != nil {
+		if err := s.checkImage(entry, entry.Name(), false); err != nil {
 			return err
 		}
 	}
 	//fmt.Printf("%#v\n", s.Images)
-	//if err := s.saveImages(); err != nil {
-	//return err
-	//}
-	if err := s.Thumbnails.Generate(s.Images); err != nil {
-		log.Printf("Thumbnail error: %v", err)
-	}
-	return nil
+	return s.syncImages()
 }
 
 func (s *DirectoryScanner) checkImage(entry os.DirEntry, relImgPath string, inCovers bool) error {
@@ -103,7 +108,7 @@ func (s *DirectoryScanner) checkImage(entry os.DirEntry, relImgPath string, inCo
 		if err != nil {
 			return err
 		}
-		s.Images = append(s.Images, lib.DirectoryImage{
+		s.Images = append(s.Images, lib.Image{
 			DirectoryID: s.Dir.ID,
 			Path:        relImgPath,
 			FullPath:    fullPath,
@@ -122,6 +127,12 @@ func (s *DirectoryScanner) checkImage(entry os.DirEntry, relImgPath string, inCo
 
 func (s *DirectoryScanner) detectImageType(name string, inCovers bool) lib.ImageType {
 	n := strings.ToLower(name)
+
+	// artist logo
+	if isArtistLogo(n) {
+		return lib.ImageTypeArtistLogo
+	}
+
 	for _, t := range imageKeywords {
 		if strings.Contains(n, t.Keyword) {
 			// Front.jpg next to the music is the album's main image
@@ -135,31 +146,134 @@ func (s *DirectoryScanner) detectImageType(name string, inCovers bool) lib.Image
 	return lib.ImageTypeOther
 }
 
-func (s *DirectoryScanner) saveImages() error {
-	if len(s.Images) == 0 {
+func (s *DirectoryScanner) syncImages() error {
+	oldImages, err := database.GetImagesByDirectory(s.DB, s.Dir.ID)
+	if err != nil {
+		return err
+	}
+
+	oldByPath := make(map[string]lib.Image, len(oldImages))
+	for _, img := range oldImages {
+		oldByPath[img.Path] = img
+	}
+
+	newByPath := make(map[string]lib.Image, len(s.Images))
+	for _, img := range s.Images {
+		newByPath[img.Path] = img
+	}
+
+	// images that need to be removed from DB and whose thumbnails
+	// need to be removed
+	var imagesToDelete []lib.Image
+
+	for _, oldImg := range oldImages {
+		newImg, exists := newByPath[oldImg.Path]
+
+		// image was deleted from filesystem
+		if !exists {
+			imagesToDelete = append(imagesToDelete, oldImg)
+			continue
+		}
+
+		// image was changed
+		if oldImg.Mtime != newImg.Mtime || oldImg.Size != newImg.Size {
+			imagesToDelete = append(imagesToDelete, oldImg)
+		}
+	}
+
+	// images that need to be inserted into DB and whose thumbnails
+	// need to be generated
+	var imagesToSave []lib.Image
+
+	for _, img := range s.Images {
+		oldImg, exists := oldByPath[img.Path]
+
+		// new image
+		if !exists {
+			imagesToSave = append(imagesToSave, img)
+			continue
+		}
+
+		// changed image
+		if oldImg.Mtime != img.Mtime || oldImg.Size != img.Size {
+			imagesToSave = append(imagesToSave, img)
+		}
+	}
+
+	// nothing changed
+	if len(imagesToDelete) == 0 && len(imagesToSave) == 0 {
 		return nil
 	}
+
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	for _, img := range s.Images {
-		_, err = database.SaveImage(tx, s.Dir.ID, &img)
+	// if there are artist logos, make sure ArtistID is known
+	hasArtistLogo := false
+
+	for _, img := range imagesToSave {
+		if img.Type == lib.ImageTypeArtistLogo {
+			hasArtistLogo = true
+			break
+		}
+	}
+
+	if hasArtistLogo && s.ArtistID == nil {
+		artistName := filepath.Base(filepath.Clean(s.Path))
+		if artistName == "." || artistName == "" {
+			return fmt.Errorf("invalid artist directory: %q", s.Path)
+		}
+		artistID, err := database.GetOrAddArtist(tx, artistName)
 		if err != nil {
+			return err
+		}
+		s.ArtistID = &artistID
+	}
+
+	// delete old/removed/changed images from DB
+	for _, img := range imagesToDelete {
+		if err := database.DeleteImage(tx, img.ID); err != nil {
 			return err
 		}
 	}
 
-	if err = database.UpdateDirectoryLastScan(tx, s.Dir.ID); err != nil {
+	// insert new/changed images into DB
+	for i := range imagesToSave {
+		if imagesToSave[i].Type == lib.ImageTypeArtistLogo {
+			imagesToSave[i].ArtistID = s.ArtistID
+		}
+		if _, err := database.SaveImage(tx, s.Dir.ID, &imagesToSave[i]); err != nil {
+			return err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
 		return err
 	}
 
-	if err = tx.Commit(); err != nil {
-		return err
+	// DB is now synchronized. Remove thumbnails belonging to
+	// deleted/changed images
+	for _, img := range imagesToDelete {
+		if err := s.Thumbnails.Delete(&img); err != nil {
+			log.Printf("Thumbnail delete error '%s/%s': %v", s.Path, img.Path, err)
+		}
+		if _, exists := newByPath[img.Path]; exists {
+			log.Printf("Image changed: '%s/%s'\n", s.Path, img.Path)
+		} else {
+			log.Printf("Image deleted: '%s/%s'\n", s.Path, img.Path)
+		}
 	}
-	log.Printf("Images saved successfully '%s'\n", s.Path)
+
+	// Generate thumbnails for new/changed images
+	if len(imagesToSave) > 0 {
+		if err := s.Thumbnails.Generate(imagesToSave); err != nil {
+			log.Printf("Thumbnail error: %v", err)
+		}
+	}
+
 	return nil
 }
 
@@ -182,35 +296,32 @@ func GetImageConfig(path string) (lib.ImageConfig, error) {
 	}, nil
 }
 
-const defaultThumbnailHeight = 640
+const defaultThumbnailSize = 640
 const thumbnailJPEGQuality = 90
 
 var (
-	defaultThumbnailHeights = []int{defaultThumbnailHeight}
+	defaultThumbnailSizes = []int{defaultThumbnailSize}
 
-	frontThumbnailHeights = []int{
-		160,
-		320,
-		defaultThumbnailHeight,
-	}
-
-	thumbnailHeights = map[lib.ImageType][]int{
-		lib.ImageTypeMainFront: frontThumbnailHeights,
-		lib.ImageTypeFront:     frontThumbnailHeights,
+	thumbnailSizes = map[lib.ImageType][]int{
+		lib.ImageTypeMainFront: {
+			160,
+			320,
+			defaultThumbnailSize,
+		},
 	}
 )
 
-func thumbnailHeightsFor(t lib.ImageType) []int {
-	if heights, ok := thumbnailHeights[t]; ok {
-		return heights
+func thumbnailSizesFor(t lib.ImageType) []int {
+	if sizes, ok := thumbnailSizes[t]; ok {
+		return sizes
 	}
-	return defaultThumbnailHeights
+	return defaultThumbnailSizes
 }
 
-func (g *ThumbnailGenerator) Generate(images []lib.DirectoryImage) error {
+func (g *ThumbnailGenerator) Generate(images []lib.Image) error {
 	for _, img := range images {
-		for _, height := range thumbnailHeightsFor(img.Type) {
-			if err := g.generateOne(&img, height); err != nil {
+		for _, size := range thumbnailSizesFor(img.Type) {
+			if err := g.generateOne(&img, size); err != nil {
 				return err
 			}
 		}
@@ -218,20 +329,13 @@ func (g *ThumbnailGenerator) Generate(images []lib.DirectoryImage) error {
 	return nil
 }
 
-func (g *ThumbnailGenerator) generateOne(img *lib.DirectoryImage, targetHeight int) error {
-	dstPath := g.thumbnailPath(img, targetHeight)
+func (g *ThumbnailGenerator) generateOne(img *lib.Image, targetSize int) error {
+	dstPath := g.thumbnailPath(img, targetSize)
+
 	if info, err := os.Stat(dstPath); err == nil {
 		if info.ModTime().Unix() == img.Mtime {
 			return nil
 		}
-	}
-
-	// if the original is already smaller than the required height just copy original
-	if img.Height <= targetHeight {
-		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
-			return err
-		}
-		return copyFile(img.FullPath, dstPath)
 	}
 
 	srcFile, err := os.Open(img.FullPath)
@@ -249,9 +353,26 @@ func (g *ThumbnailGenerator) generateOne(img *lib.DirectoryImage, targetHeight i
 	srcWidth := bounds.Dx()
 	srcHeight := bounds.Dy()
 
-	targetWidth := srcWidth * targetHeight / srcHeight
+	// image is already small enough — don't resize, just save it as JPEG
+	if img.Height <= targetSize {
+		return saveJPEG(dstPath, src, img.Mtime)
+	}
 
-	dst := image.NewRGBA(image.Rect(0, 0, targetWidth, targetHeight))
+	var targetWidth, targetHeightPx int
+
+	aspectRatio := float64(srcHeight) / float64(srcWidth)
+
+	if aspectRatio >= 1.3 {
+		// very tall image - limit width
+		targetWidth = targetSize
+		targetHeightPx = srcHeight * targetWidth / srcWidth
+	} else {
+		// regular or wide image - limit height
+		targetHeightPx = targetSize
+		targetWidth = srcWidth * targetHeightPx / srcHeight
+	}
+
+	dst := image.NewRGBA(image.Rect(0, 0, targetWidth, targetHeightPx))
 
 	draw.CatmullRom.Scale(
 		dst,
@@ -262,6 +383,10 @@ func (g *ThumbnailGenerator) generateOne(img *lib.DirectoryImage, targetHeight i
 		nil,
 	)
 
+	return saveJPEG(dstPath, dst, img.Mtime)
+}
+
+func saveJPEG(dstPath string, img image.Image, mtime int64) error {
 	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
 		return err
 	}
@@ -271,9 +396,10 @@ func (g *ThumbnailGenerator) generateOne(img *lib.DirectoryImage, targetHeight i
 		return err
 	}
 
-	if err := jpeg.Encode(out, dst, &jpeg.Options{
+	if err := jpeg.Encode(out, img, &jpeg.Options{
 		Quality: thumbnailJPEGQuality,
 	}); err != nil {
+		out.Close()
 		return err
 	}
 
@@ -281,54 +407,38 @@ func (g *ThumbnailGenerator) generateOne(img *lib.DirectoryImage, targetHeight i
 		return err
 	}
 
-	t := time.Unix(img.Mtime, 0)
+	t := time.Unix(mtime, 0)
 	return os.Chtimes(dstPath, t, t)
 }
 
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	if _, err = io.Copy(out, in); err != nil {
-		return err
-	}
-
-	if err := out.Close(); err != nil {
-		return err
-	}
-
-	info, err := os.Stat(src)
-	if err != nil {
-		return err
-	}
-
-	return os.Chtimes(dst, info.ModTime(), info.ModTime())
-}
-
-func (g *ThumbnailGenerator) thumbnailPath(img *lib.DirectoryImage, height int) string {
+func (g *ThumbnailGenerator) thumbnailPath(img *lib.Image, size int) string {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(img.Path))
 
 	filename := fmt.Sprintf(
-		"%d_%03d_%02d_%016x.jpg",
+		"%d_%02d_%016x.jpg",
 		img.DirectoryID,
-		img.Order,
 		img.Type,
 		h.Sum64(),
 	)
 
 	return filepath.Join(
 		g.CacheDir,
-		fmt.Sprintf("%d", height),
+		fmt.Sprintf("%d", size),
 		filename,
 	)
+}
+
+func (g *ThumbnailGenerator) Delete(img *lib.Image) error {
+	for _, size := range thumbnailSizesFor(img.Type) {
+		path := g.thumbnailPath(img, size)
+		err := os.Remove(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return err
+		}
+	}
+	return nil
 }
