@@ -1,6 +1,6 @@
 import { html } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
-import { setProgress, type RootState, fetchTracksMode, fetchAlbumsMode } from '@/store'
+import { setProgress, type RootState, fetchTracksMode, fetchAlbumsMode, fetchArtistsMode } from '@/store'
 import { Router } from '@lit-labs/router'
 import SonaryLitElement from '@/base'
 import '@/assets/style.scss'
@@ -55,7 +55,7 @@ export class SonaryApp extends SonaryLitElement {
           <span slot="separator">/</span>
           <wa-breadcrumb-item>Artists</wa-breadcrumb-item>
         </wa-breadcrumb>
-        <sonary-artists-list .baseRoute="${import.meta.env.VITE_BASE_APP_ROUTE}"></sonary-artists-list>
+        <sonary-artists-list .baseRoute="${import.meta.env.VITE_BASE_APP_ROUTE}" .mode=${fetchArtistsMode.Random}></sonary-artists-list>
       `
         },
         {

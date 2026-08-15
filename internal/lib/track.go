@@ -61,11 +61,12 @@ type ArtistDB struct {
 }
 
 type AlbumDB struct {
-	ID       int
-	ArtistID int
-	Artist   string
-	Title    string
-	Year     int
+	ID           int
+	ArtistID     int
+	Artist       string
+	Title        string
+	Year         int
+	DirectoryIDs []int
 }
 
 type TrackDB struct {
@@ -76,6 +77,7 @@ type TrackDB struct {
 	Artist         string
 	ArtistID       int
 	AlbumArtist    string
+	DirectoryID    int
 	Year           int
 	Genre          string
 	Album          string
@@ -107,11 +109,12 @@ type TrackUpdateParams struct {
 }
 
 type ArtistsGetParams struct {
-	ID    *int
-	IDs   []int
-	Name  *string
-	Limit int
-	Page  *int
+	ID     *int
+	IDs    []int
+	Name   *string
+	Random bool
+	Limit  int
+	Page   *int
 }
 
 type AlbumsGetParams struct {
@@ -138,6 +141,8 @@ func (params *ConvertParams) ToString() string {
 	return params.Format + "_" + params.Mode + "_" + params.Quality + "_" + pr
 }
 
+const DefaultThumbnailSize = 640
+
 type ImageType int
 
 const (
@@ -154,6 +159,35 @@ const (
 	ImageTypeOther
 )
 
+func (t ImageType) String() string {
+	switch t {
+	case ImageTypeArtistLogo:
+		return "artist-logo"
+	case ImageTypeMainFront:
+		return "main-front"
+	case ImageTypeFront:
+		return "front"
+	case ImageTypeBack:
+		return "back"
+	case ImageTypeDisc:
+		return "disc"
+	case ImageTypeBooklet:
+		return "booklet"
+	case ImageTypeInlay:
+		return "inlay"
+	case ImageTypeInside:
+		return "inside"
+	case ImageTypeDigipack:
+		return "digipack"
+	case ImageTypeSlipcase:
+		return "slipcase"
+	case ImageTypeOther:
+		return "other"
+	default:
+		return "unknown"
+	}
+}
+
 type Image struct {
 	ID          int
 	DirectoryID int
@@ -169,9 +203,47 @@ type Image struct {
 	Mtime       int64
 }
 
+type ImageGroupBy int
+
+const (
+	ImageGroupByDirectory ImageGroupBy = iota
+	ImageGroupByArtist
+)
+
+type ImagesGetParams struct {
+	DirectoryIDs []int
+	ArtistIDs    []int
+	Type         *ImageType
+	GroupBy      ImageGroupBy
+}
+
 type ImageConfig struct {
 	Width, Height int
 	Format        string
+}
+
+var (
+	defaultThumbnailSizes = []int{DefaultThumbnailSize}
+
+	thumbnailSizes = map[ImageType][]int{
+		ImageTypeArtistLogo: {
+			160,
+			320,
+			DefaultThumbnailSize,
+		},
+		ImageTypeMainFront: {
+			160,
+			320,
+			DefaultThumbnailSize,
+		},
+	}
+)
+
+func ThumbnailSizesFor(t ImageType) []int {
+	if sizes, ok := thumbnailSizes[t]; ok {
+		return sizes
+	}
+	return defaultThumbnailSizes
 }
 
 type ScanFileType int

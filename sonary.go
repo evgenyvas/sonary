@@ -80,10 +80,36 @@ func (api *API) GetTracks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	directoryIDs := make([]int, 0, len(tracks))
+	seen := make(map[int]struct{})
+	for _, track := range tracks {
+		if _, ok := seen[track.DirectoryID]; ok {
+			continue
+		}
+		seen[track.DirectoryID] = struct{}{}
+		directoryIDs = append(directoryIDs, track.DirectoryID)
+	}
+
+	images, err := database.GetImages(api.readDB, lib.ImagesGetParams{
+		DirectoryIDs: directoryIDs,
+		Type:         utils.Ptr(lib.ImageTypeMainFront),
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	apiTracks := make([]lib.APITrack, len(tracks))
 	for i, track := range tracks {
-		apiTracks[i] = track.ToAPI()
+		apiTrack := track.ToAPI()
+		if img, ok := images[track.DirectoryID]; ok {
+			if len(img) > 0 {
+				apiTrack.Cover = lib.ImageURLs(&img[0], lib.ImageTypeMainFront)
+			}
+		}
+		apiTracks[i] = apiTrack
 	}
+
 	apiTrackList := lib.APITrackList{
 		APIStatus: lib.APIStatus{
 			Status:  http.StatusOK,
@@ -116,12 +142,27 @@ func (api *API) GetTrack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	images, err := database.GetImages(api.readDB, lib.ImagesGetParams{
+		DirectoryIDs: []int{track.DirectoryID},
+		Type:         utils.Ptr(lib.ImageTypeMainFront),
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	apiTrack := lib.APITrackSingle{
 		APIStatus: lib.APIStatus{
 			Status:  http.StatusOK,
 			Message: "ok",
 		},
 		APITrack: track.ToAPI(),
+	}
+
+	if img, ok := images[track.DirectoryID]; ok {
+		if len(img) > 0 {
+			apiTrack.Cover = lib.ImageURLs(&img[0], lib.ImageTypeMainFront)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -189,7 +230,31 @@ func (api *API) GetArtists(w http.ResponseWriter, r *http.Request) {
 		params.Page = utils.Ptr(page)
 	}
 
+	var mode lib.FetchArtistsMode
+	if err := mode.UnmarshalText([]byte(q.Get("mode"))); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	switch mode {
+	case lib.FetchArtistsModeRandom:
+		params.Random = true
+	}
+
 	artists, hasNext, err := database.GetArtists(api.readDB, params)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	artistIDs := make([]int, 0, len(artists))
+	for _, artist := range artists {
+		artistIDs = append(artistIDs, artist.ID)
+	}
+
+	images, err := database.GetImages(api.readDB, lib.ImagesGetParams{
+		ArtistIDs: artistIDs,
+		GroupBy:   lib.ImageGroupByArtist,
+	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -197,7 +262,23 @@ func (api *API) GetArtists(w http.ResponseWriter, r *http.Request) {
 
 	apiArtists := make([]lib.APIArtist, len(artists))
 	for i, artist := range artists {
-		apiArtists[i] = artist.ToAPI()
+		apiArtist := artist.ToAPI()
+		apiArtist.Images = []lib.APIImage{}
+		if imgArtist, ok := images[artist.ID]; ok {
+			if len(imgArtist) > 0 {
+				for _, img := range imgArtist {
+					if img.Type == lib.ImageTypeArtistLogo {
+						apiArtist.Logo = lib.ImageURLs(&img, img.Type)
+					}
+					apiArtist.Images = append(apiArtist.Images, lib.APIImage{
+						URL:   lib.ThumbnailURL(&img, lib.DefaultThumbnailSize),
+						Type:  img.Type.String(),
+						Order: img.Order,
+					})
+				}
+			}
+		}
+		apiArtists[i] = apiArtist
 	}
 	apiArtistList := lib.APIArtistList{
 		APIStatus: lib.APIStatus{
@@ -237,7 +318,7 @@ func (api *API) GetArtist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var apiRelatedArtists []lib.APIArtist
+	apiRelatedArtists := []lib.APIArtist{}
 	if len(relatedArtistsIDs) > 0 {
 		relatedArtists, _, err := database.GetArtists(api.readDB, lib.ArtistsGetParams{IDs: relatedArtistsIDs})
 		if err != nil {
@@ -249,6 +330,14 @@ func (api *API) GetArtist(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	images, err := database.GetImagesFlat(api.readDB, lib.ImagesGetParams{
+		ArtistIDs: []int{id},
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	apiArtist := lib.APIArtistSingle{
 		APIStatus: lib.APIStatus{
 			Status:  http.StatusOK,
@@ -256,6 +345,18 @@ func (api *API) GetArtist(w http.ResponseWriter, r *http.Request) {
 		},
 		APIArtist:      artist.ToAPI(),
 		RelatedArtists: apiRelatedArtists,
+	}
+
+	apiArtist.Images = []lib.APIImage{}
+	for _, img := range images {
+		if img.Type == lib.ImageTypeArtistLogo {
+			apiArtist.Logo = lib.ImageURLs(&img, img.Type)
+		}
+		apiArtist.Images = append(apiArtist.Images, lib.APIImage{
+			URL:   lib.ThumbnailURL(&img, lib.DefaultThumbnailSize),
+			Type:  img.Type.String(),
+			Order: img.Order,
+		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -301,10 +402,75 @@ func (api *API) GetAlbums(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	albumIDs := make([]int, len(albums))
+	artistIDs := make([]int, len(albums))
+	seen := make(map[int]struct{})
+	for _, album := range albums {
+		albumIDs = append(albumIDs, album.ID)
+		if _, ok := seen[album.ArtistID]; ok {
+			continue
+		}
+		seen[album.ArtistID] = struct{}{}
+		artistIDs = append(artistIDs, album.ArtistID)
+	}
+
+	imagesArtists, err := database.GetImages(api.readDB, lib.ImagesGetParams{
+		ArtistIDs: artistIDs,
+		Type:      utils.Ptr(lib.ImageTypeArtistLogo),
+		GroupBy:   lib.ImageGroupByArtist,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	albumDirectories, err := database.GetAlbumDirectories(api.readDB, albumIDs)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	directoryIDs := []int{}
+	for _, dirs := range albumDirectories {
+		directoryIDs = append(directoryIDs, dirs...)
+	}
+
+	images, err := database.GetImages(api.readDB, lib.ImagesGetParams{
+		DirectoryIDs: directoryIDs,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	apiAlbums := make([]lib.APIAlbum, len(albums))
 	for i, album := range albums {
-		apiAlbums[i] = album.ToAPI()
+		apiAlbum := album.ToAPI()
+		if imgArtist, ok := imagesArtists[album.ArtistID]; ok {
+			if len(imgArtist) > 0 {
+				for _, img := range imgArtist {
+					if img.Type == lib.ImageTypeArtistLogo {
+						apiAlbum.ArtistLogo = lib.ImageURLs(&img, img.Type)
+					}
+				}
+			}
+		}
+		if dirs, ok := albumDirectories[album.ID]; ok {
+			for _, dirID := range dirs {
+				if dirImg, ok := images[dirID]; ok {
+					for _, img := range dirImg {
+						if img.Type == lib.ImageTypeMainFront {
+							apiAlbum.Cover = lib.ImageURLs(&img, img.Type)
+						}
+						apiAlbum.Images = append(apiAlbum.Images, lib.APIImage{
+							URL:   lib.ThumbnailURL(&img, lib.DefaultThumbnailSize),
+							Type:  img.Type.String(),
+							Order: img.Order,
+						})
+					}
+				}
+			}
+		}
+		apiAlbums[i] = apiAlbum
 	}
 	apiAlbumList := lib.APIAlbumList{
 		APIStatus: lib.APIStatus{
@@ -346,6 +512,32 @@ func (api *API) GetAlbum(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	directories, err := database.GetAlbumDirectories(api.readDB, []int{album.ID})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	imagesArtist, err := database.GetImagesFlat(api.readDB, lib.ImagesGetParams{
+		ArtistIDs: []int{album.ArtistID},
+		Type:      utils.Ptr(lib.ImageTypeArtistLogo),
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	images := []lib.Image{}
+	if dirIDs, ok := directories[album.ID]; ok {
+		images, err = database.GetImagesFlat(api.readDB, lib.ImagesGetParams{
+			DirectoryIDs: dirIDs,
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
 	apiTracks := make([]lib.APITrack, len(tracks))
 	for i, track := range tracks {
 		apiTracks[i] = track.ToAPI()
@@ -358,6 +550,22 @@ func (api *API) GetAlbum(w http.ResponseWriter, r *http.Request) {
 		},
 		APIAlbum: album.ToAPI(),
 		Tracks:   apiTracks,
+	}
+
+	if len(imagesArtist) > 0 {
+		apiAlbum.ArtistLogo = lib.ImageURLs(&imagesArtist[0], lib.ImageTypeMainFront)
+	}
+
+	apiAlbum.Images = []lib.APIImage{}
+	for _, img := range images {
+		if img.Type == lib.ImageTypeMainFront {
+			apiAlbum.Cover = lib.ImageURLs(&img, img.Type)
+		}
+		apiAlbum.Images = append(apiAlbum.Images, lib.APIImage{
+			URL:   lib.ThumbnailURL(&img, lib.DefaultThumbnailSize),
+			Type:  img.Type.String(),
+			Order: img.Order,
+		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -573,6 +781,13 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+func cacheMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		next.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	cfg := config.GetConfig()
 
@@ -627,9 +842,19 @@ func main() {
 		}
 	})
 
-	// Serve files from the "./static" directory at the "/static/" URL path
+	// serve files from the "./static" directory at the "/static/" URL path
 	fileServer := http.FileServer(http.Dir("./static"))
 	mux.Handle("/static/", http.StripPrefix("/static", fileServer))
+
+	// serve generated image thumbnails
+	imageServer := http.FileServer(http.Dir(cfg.CacheDir))
+
+	mux.Handle(
+		"/api/v1/images/",
+		cacheMiddleware(
+			http.StripPrefix("/api/v1/images/", imageServer),
+		),
+	)
 
 	// WebSocket
 	hub := websocket.GetHub()

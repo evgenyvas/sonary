@@ -2,6 +2,7 @@
 package track
 
 import (
+	"bytes"
 	"database/sql"
 	"fmt"
 	"io/fs"
@@ -356,6 +357,8 @@ func (s *DirectoryScanner) processSideFile() error {
 		if err != nil {
 			return err
 		}
+		// remove BOM
+		data = bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF})
 		if !utf8.Valid(data) {
 			encodings := []encoding.Encoding{
 				charmap.Windows1251,

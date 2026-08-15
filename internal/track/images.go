@@ -2,7 +2,6 @@ package track
 
 import (
 	"fmt"
-	"hash/fnv"
 	"image"
 	"image/jpeg"
 	_ "image/png"
@@ -147,10 +146,14 @@ func (s *DirectoryScanner) detectImageType(name string, inCovers bool) lib.Image
 }
 
 func (s *DirectoryScanner) syncImages() error {
-	oldImages, err := database.GetImagesByDirectory(s.DB, s.Dir.ID)
+	imagesByDirectory, err := database.GetImages(s.DB, lib.ImagesGetParams{
+		DirectoryIDs: []int{s.Dir.ID},
+	})
 	if err != nil {
 		return err
 	}
+
+	oldImages := imagesByDirectory[s.Dir.ID]
 
 	oldByPath := make(map[string]lib.Image, len(oldImages))
 	for _, img := range oldImages {
@@ -296,31 +299,11 @@ func GetImageConfig(path string) (lib.ImageConfig, error) {
 	}, nil
 }
 
-const defaultThumbnailSize = 640
 const thumbnailJPEGQuality = 90
-
-var (
-	defaultThumbnailSizes = []int{defaultThumbnailSize}
-
-	thumbnailSizes = map[lib.ImageType][]int{
-		lib.ImageTypeMainFront: {
-			160,
-			320,
-			defaultThumbnailSize,
-		},
-	}
-)
-
-func thumbnailSizesFor(t lib.ImageType) []int {
-	if sizes, ok := thumbnailSizes[t]; ok {
-		return sizes
-	}
-	return defaultThumbnailSizes
-}
 
 func (g *ThumbnailGenerator) Generate(images []lib.Image) error {
 	for _, img := range images {
-		for _, size := range thumbnailSizesFor(img.Type) {
+		for _, size := range lib.ThumbnailSizesFor(img.Type) {
 			if err := g.generateOne(&img, size); err != nil {
 				return err
 			}
@@ -412,25 +395,15 @@ func saveJPEG(dstPath string, img image.Image, mtime int64) error {
 }
 
 func (g *ThumbnailGenerator) thumbnailPath(img *lib.Image, size int) string {
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(img.Path))
-
-	filename := fmt.Sprintf(
-		"%d_%02d_%016x.jpg",
-		img.DirectoryID,
-		img.Type,
-		h.Sum64(),
-	)
-
 	return filepath.Join(
 		g.CacheDir,
 		fmt.Sprintf("%d", size),
-		filename,
+		lib.ThumbnailFilename(img, size),
 	)
 }
 
 func (g *ThumbnailGenerator) Delete(img *lib.Image) error {
-	for _, size := range thumbnailSizesFor(img.Type) {
+	for _, size := range lib.ThumbnailSizesFor(img.Type) {
 		path := g.thumbnailPath(img, size)
 		err := os.Remove(path)
 		if err != nil {

@@ -530,35 +530,80 @@ func SaveImage(db DBTX, dirID int, img *lib.Image) (*lib.Image, error) {
 	return img, nil
 }
 
-func GetImagesByDirectory(db DBTX, dirID int) ([]lib.Image, error) {
-	rows, err := db.Query(`
+func getImages(db DBTX, params lib.ImagesGetParams) ([]lib.Image, error) {
+	if len(params.DirectoryIDs) == 0 && len(params.ArtistIDs) == 0 {
+		return []lib.Image{}, nil
+	}
+
+	var sb strings.Builder
+	var conditions []string
+	var args []any
+
+	sb.WriteString(`
 		SELECT id, directory_id, artist_id, path, type, format,
-		sort_order, width, height, size, mtime
+			sort_order, width, height, size, mtime
 		FROM images
-		WHERE directory_id = ?
-	`, dirID)
+	`)
+
+	// Directory IDs
+	if len(params.DirectoryIDs) > 0 {
+		placeholders := make([]string, len(params.DirectoryIDs))
+
+		for i, id := range params.DirectoryIDs {
+			placeholders[i] = "?"
+			args = append(args, id)
+		}
+
+		conditions = append(
+			conditions,
+			"directory_id IN ("+strings.Join(placeholders, ",")+")",
+		)
+	}
+
+	// Artist IDs
+	if len(params.ArtistIDs) > 0 {
+		placeholders := make([]string, len(params.ArtistIDs))
+
+		for i, id := range params.ArtistIDs {
+			placeholders[i] = "?"
+			args = append(args, id)
+		}
+
+		conditions = append(
+			conditions,
+			"artist_id IN ("+strings.Join(placeholders, ",")+")",
+		)
+	}
+
+	// Image type
+	if params.Type != nil {
+		conditions = append(conditions, "type = ?")
+		args = append(args, *params.Type)
+	}
+
+	if len(conditions) > 0 {
+		sb.WriteString(" WHERE ")
+		sb.WriteString(strings.Join(conditions, " AND "))
+	}
+
+	sb.WriteString(`
+		ORDER BY directory_id, sort_order, id
+	`)
+
+	rows, err := db.Query(sb.String(), args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var images []lib.Image
+	images := make([]lib.Image, 0)
 
 	for rows.Next() {
 		var img lib.Image
 
 		if err := rows.Scan(
-			&img.ID,
-			&img.DirectoryID,
-			&img.ArtistID,
-			&img.Path,
-			&img.Type,
-			&img.Format,
-			&img.Order,
-			&img.Width,
-			&img.Height,
-			&img.Size,
-			&img.Mtime,
+			&img.ID, &img.DirectoryID, &img.ArtistID, &img.Path, &img.Type, &img.Format,
+			&img.Order, &img.Width, &img.Height, &img.Size, &img.Mtime,
 		); err != nil {
 			return nil, err
 		}
@@ -571,6 +616,85 @@ func GetImagesByDirectory(db DBTX, dirID int) ([]lib.Image, error) {
 	}
 
 	return images, nil
+}
+
+func GetImagesFlat(db DBTX, params lib.ImagesGetParams) ([]lib.Image, error) {
+	return getImages(db, params)
+}
+
+func GetImages(db DBTX, params lib.ImagesGetParams) (map[int][]lib.Image, error) {
+	images, err := getImages(db, params)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[int][]lib.Image)
+
+	for _, img := range images {
+		var key int
+
+		switch params.GroupBy {
+		case lib.ImageGroupByArtist:
+			if img.ArtistID == nil {
+				continue
+			}
+			key = *img.ArtistID
+
+		case lib.ImageGroupByDirectory:
+			key = img.DirectoryID
+
+		default:
+			return nil, fmt.Errorf("unsupported image group: %d", params.GroupBy)
+		}
+
+		result[key] = append(result[key], img)
+	}
+
+	return result, nil
+}
+
+func GetAlbumDirectories(db DBTX, albumIDs []int) (map[int][]int, error) {
+	if len(albumIDs) == 0 {
+		return make(map[int][]int), nil
+	}
+
+	placeholders := make([]string, len(albumIDs))
+	args := make([]any, len(albumIDs))
+
+	for i, id := range albumIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := `
+		SELECT DISTINCT album_id, directory_id
+		FROM tracks
+		WHERE album_id IN (` + strings.Join(placeholders, ",") + `)
+		ORDER BY album_id, directory_id
+	`
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[int][]int)
+
+	for rows.Next() {
+		var albumID int
+		var directoryID int
+		if err := rows.Scan(&albumID, &directoryID); err != nil {
+			return nil, err
+		}
+		result[albumID] = append(result[albumID], directoryID)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 func DeleteImage(db DBTX, imageID int) error {
@@ -598,7 +722,7 @@ func GetTracks(db *sql.DB, params lib.TracksGetParams) ([]lib.TrackDB, bool, err
 		SELECT t.id, t.path, t.file_type, t.title, ar.name, t.artist_id, alr.name,
 				t.year, t.genre, al.title, t.album_id, t.track_number, t.duration,
 				t.has_pregap, t.pregap_duration, t.lyrics, t.is_cue, t.cue_file,
-				t.cue_offset, t.is_like
+				t.cue_offset, t.is_like, t.directory_id
 		FROM tracks t
 		LEFT JOIN albums al ON al.id = t.album_id
 		LEFT JOIN artists ar ON ar.id = t.artist_id
@@ -677,7 +801,7 @@ func GetTracks(db *sql.DB, params lib.TracksGetParams) ([]lib.TrackDB, bool, err
 		err := rows.Scan(&t.ID, &t.Path, &t.FileType, &t.Title, &t.Artist, &t.ArtistID,
 			&t.AlbumArtist, &t.Year, &t.Genre, &t.Album, &t.AlbumID, &t.TrackNumber,
 			&t.Duration, &t.HasPregap, &t.PregapDuration, &t.Lyrics, &t.IsCue, &t.CueFile,
-			&t.CueOffset, &t.IsLike)
+			&t.CueOffset, &t.IsLike, &t.DirectoryID)
 		if err != nil {
 			return nil, false, err
 		}
@@ -782,7 +906,11 @@ func GetArtists(db DBTX, params lib.ArtistsGetParams) ([]lib.ArtistDB, bool, err
 	}
 
 	// sort
-	sb.WriteString(" ORDER BY id ASC ")
+	if params.Random {
+		sb.WriteString(" ORDER BY RANDOM() ")
+	} else {
+		sb.WriteString(" ORDER BY id ASC ")
+	}
 
 	// limit / offset
 	if params.ID != nil {

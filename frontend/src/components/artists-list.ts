@@ -5,7 +5,7 @@ import { repeat } from 'lit/directives/repeat.js'
 import type { Artist } from '@/types'
 import store, {
     fetchArtists, setProgressIndeterminate, getArtistsKey, setCurrentArtistsKey,
-    type RootState, type ArtistsQuery
+    fetchArtistsMode, type RootState, type ArtistsQuery
 } from '@/store'
 import '@awesome.me/webawesome/dist/components/button/button.js'
 import '@awesome.me/webawesome/dist/components/card/card.js'
@@ -30,11 +30,15 @@ export class ArtistsList extends SonaryLitElement {
     @property({ type: Number })
     limit = 300
 
+    @property({ type: String })
+    mode: fetchArtistsMode = fetchArtistsMode.All
+
     @property({ type: String, attribute: 'base-route' })
     baseRoute: string = '/'
 
     private get query(): ArtistsQuery {
         return {
+            mode: this.mode,
             relatedArtistId: this.relatedArtistId ?? undefined,
         }
     }
@@ -61,7 +65,7 @@ export class ArtistsList extends SonaryLitElement {
         this._isLoading = true
         this.store.dispatch(setCurrentArtistsKey(this.queryKey))
         this.store.dispatch(setProgressIndeterminate(true))
-        store.dispatch(fetchArtists(this.limit, this._page)).then(() => {
+        store.dispatch(fetchArtists(this.query, this.limit, this._page)).then(() => {
             this._isLoading = false
             this.store.dispatch(setProgressIndeterminate(false))
         })

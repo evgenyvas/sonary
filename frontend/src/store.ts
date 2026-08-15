@@ -30,11 +30,13 @@ const initialStateTrack = {
 }
 
 export interface ArtistsQuery {
+    mode: fetchArtistsMode
     relatedArtistId?: number
 }
 
 export function getArtistsKey(query: ArtistsQuery): string {
     return [
+        query.mode,
         query.relatedArtistId ?? '-',
     ].join(':')
 }
@@ -376,9 +378,17 @@ export const updateTrack = (trackId: number, params: updateTrackParams): any => 
     }
 }
 
-export const fetchArtists = (limit: number = 50, page: number | null = null): any => {
+export enum fetchArtistsMode {
+    All = "ALL",
+    Random = "RANDOM",
+}
+
+export const fetchArtists = (query: ArtistsQuery,
+    limit: number = 50, page: number | null = null): any => {
     return async (dispatch: AppDispatch) => {
-        let params: { limit: number, page?: number } = { limit }
+        let params: {
+            mode: fetchArtistsMode, limit: number, page?: number
+        } = { mode: query.mode, limit }
         if (page) {
             params.page = page
         }
@@ -396,15 +406,6 @@ export const fetchArtists = (limit: number = 50, page: number | null = null): an
 
 export const fetchArtist = (artistId: number): any => {
     return async (dispatch: AppDispatch) => {
-        const storeState = store.getState()
-        if (storeState.artists.isInitList) { // try to find in already loaded
-            let foundItem: Artist | undefined = storeState.artists.items.find((el: Artist) => el.id === artistId)
-            if (foundItem) {
-                return new Promise((resolve) => {
-                    resolve(dispatch(setArtistItem(foundItem)))
-                })
-            }
-        }
         return httpClient('/v1/artists/' + artistId, {
             method: 'GET',
         })
@@ -413,6 +414,7 @@ export const fetchArtist = (artistId: number): any => {
                 dispatch(setArtistItems(response.related))
                 dispatch(setArtistHasNext(false))
                 dispatch(setCurrentArtistsKey(getArtistsKey({
+                    mode: fetchArtistsMode.All,
                     relatedArtistId: artistId,
                 })))
             })

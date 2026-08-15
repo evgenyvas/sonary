@@ -2,6 +2,8 @@ package lib
 
 import (
 	"fmt"
+	"hash/fnv"
+	"strconv"
 )
 
 type APIStatus struct {
@@ -9,23 +11,26 @@ type APIStatus struct {
 	Message string `json:"message"`
 }
 
+type APIImageSizes map[int]string
+
 type APITrack struct {
-	ID             int    `json:"id"`
-	FileType       string `json:"type"`
-	Title          string `json:"title"`
-	Artist         string `json:"artist"`
-	ArtistID       int    `json:"artist_id"`
-	AlbumArtist    string `json:"albumArtist"`
-	Year           int    `json:"year"`
-	Genre          string `json:"genre"`
-	Album          string `json:"album"`
-	AlbumID        int    `json:"album_id"`
-	TrackNumber    int    `json:"number"`
-	Duration       int    `json:"duration"`
-	HasPregap      bool   `json:"pregap"`
-	PregapDuration int    `json:"pregap_duration"`
-	Lyrics         string `json:"lyrics"`
-	IsLike         bool   `json:"like"`
+	ID             int           `json:"id"`
+	FileType       string        `json:"type"`
+	Title          string        `json:"title"`
+	Artist         string        `json:"artist"`
+	ArtistID       int           `json:"artist_id"`
+	AlbumArtist    string        `json:"albumArtist"`
+	Year           int           `json:"year"`
+	Genre          string        `json:"genre"`
+	Album          string        `json:"album"`
+	AlbumID        int           `json:"album_id"`
+	Cover          APIImageSizes `json:"cover,omitempty"`
+	TrackNumber    int           `json:"number"`
+	Duration       int           `json:"duration"`
+	HasPregap      bool          `json:"pregap"`
+	PregapDuration int           `json:"pregap_duration"`
+	Lyrics         string        `json:"lyrics"`
+	IsLike         bool          `json:"like"`
 }
 
 type APITrackSingle struct {
@@ -91,9 +96,29 @@ func (m *FetchTracksMode) UnmarshalText(text []byte) error {
 	}
 }
 
+type FetchArtistsMode string
+
+const (
+	FetchArtistsModeAll    FetchArtistsMode = "ALL"
+	FetchArtistsModeRandom FetchArtistsMode = "RANDOM"
+)
+
+func (m *FetchArtistsMode) UnmarshalText(text []byte) error {
+	switch FetchArtistsMode(text) {
+	case FetchArtistsModeAll,
+		FetchArtistsModeRandom:
+		*m = FetchArtistsMode(text)
+		return nil
+	default:
+		return fmt.Errorf("invalid mode: %q", text)
+	}
+}
+
 type APIArtist struct {
-	ID   int    `json:"id"`
-	Name string `json:"name"`
+	ID     int           `json:"id"`
+	Name   string        `json:"name"`
+	Logo   APIImageSizes `json:"logo,omitempty"`
+	Images []APIImage    `json:"images"`
 }
 
 type APIArtistSingle struct {
@@ -115,12 +140,21 @@ func (t *ArtistDB) ToAPI() APIArtist {
 	}
 }
 
+type APIImage struct {
+	URL   string `json:"url"`
+	Type  string `json:"type"`
+	Order int    `json:"order"`
+}
+
 type APIAlbum struct {
-	ID       int    `json:"id"`
-	Artist   string `json:"artist"`
-	ArtistID int    `json:"artist_id"`
-	Title    string `json:"title"`
-	Year     int    `json:"year"`
+	ID         int           `json:"id"`
+	Artist     string        `json:"artist"`
+	ArtistID   int           `json:"artist_id"`
+	ArtistLogo APIImageSizes `json:"artist_logo"`
+	Title      string        `json:"title"`
+	Year       int           `json:"year"`
+	Cover      APIImageSizes `json:"cover"`
+	Images     []APIImage    `json:"images"`
 }
 
 type APIAlbumSingle struct {
@@ -180,4 +214,31 @@ type APITrackConvertPost struct {
 type APITrackPlayPost struct {
 	UserID   string `json:"userId"` // WebSocket userId
 	TrackIDs []int  `json:"track_ids"`
+}
+
+func ThumbnailFilename(img *Image, size int) string {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(img.Path))
+
+	return fmt.Sprintf(
+		"%d_%02d_%016x.jpg",
+		img.DirectoryID,
+		img.Type,
+		h.Sum64(),
+	)
+}
+
+func ThumbnailURL(img *Image, size int) string {
+	return "/api/v1/images/" +
+		strconv.Itoa(size) + "/" +
+		ThumbnailFilename(img, size)
+}
+
+func ImageURLs(img *Image, tp ImageType) APIImageSizes {
+	sizes := ThumbnailSizesFor(tp)
+	result := make(APIImageSizes, len(sizes))
+	for _, size := range sizes {
+		result[size] = ThumbnailURL(img, size)
+	}
+	return result
 }
