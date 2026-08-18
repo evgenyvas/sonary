@@ -252,7 +252,7 @@ const tracksSlice = (state = initialStateTrack, action: any) => {
             state.hasNext = action.payload
             break
         case UPDATE_ITEM:
-            state.items = state.items.map((el: Track) => (el.id === action.payload.id) ? action.payload : el)
+            state.items = state.items.map((el: Track) => el.id === action.payload.id ? { ...el, ...action.payload } : el)
             break
         case DELETE_ITEM:
             state.items = state.items.filter((el: Track) => el.id !== action.payload)

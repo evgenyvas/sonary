@@ -1,5 +1,5 @@
 import SonaryLitElement from '@/base'
-import { html } from 'lit'
+import { html, nothing } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { repeat } from 'lit/directives/repeat.js'
 import type { Album } from '@/types'
@@ -10,6 +10,7 @@ import store, {
 import '@awesome.me/webawesome/dist/components/button/button.js'
 import '@awesome.me/webawesome/dist/components/card/card.js'
 import { classMap } from 'lit/directives/class-map.js'
+import '@/components/cover-dialog'
 
 @customElement('sonary-albums-list')
 export class AlbumsList extends SonaryLitElement {
@@ -98,8 +99,16 @@ export class AlbumsList extends SonaryLitElement {
     <ol class="wa-stack wa-gap-0">
       ${repeat(this._items, (item: Album) => item.id, (item: Album, index: number) => html`
       <li class="wa-cluster" data-key="${index}">
-        <span class="wa-flank">
+        <span class="wa-flank album-year">
           <span>${item.year}</span>
+        </span>
+        <span class="wa-flank">
+          <span class="cover-list-albums">
+            <sonary-cover-dialog
+                      .thumbUrl="${item.cover?.["160"]}"
+                      .fullUrl="${item.cover?.["640"]}"
+                      .altText="${item.title}"></sonary-cover-dialog>
+          </span>
         </span>
         <span class="wa-flank">
           <span><a href="${this.baseRoute + 'albums/' + item.id}">${item.title}</a></span>
@@ -110,13 +119,15 @@ export class AlbumsList extends SonaryLitElement {
     ` : repeat(this._items, (item: Album) => item.id, (item: Album, index: number) => html`
     <a class="hover-grow hover-emphasize-border" href="${this.baseRoute + "albums/" + item.id}">
       <wa-card appearance="outlined" orientation="vertical" data-key="${index}">
-        <span class="wa-flank">
-          ${item.year === 0 ? html`
-          <span>${item.artist} - ${item.title}</span>
-          ` : html`
-          <span>${item.artist} - (${item.year}) ${item.title}</span>
-          `}
-        </span>
+        ${item.cover?.["160"] ? html`
+              <span slot="media" class="wa-text-center img-cover">
+                  <img src="${item.cover["160"]}" alt="${item.title}">
+              </span>` : nothing}
+        ${item.year === 0 ? html`
+        <span>${item.artist} - ${item.title}</span>
+        ` : html`
+        <span>${item.artist} - (${item.year}) ${item.title}</span>
+        `}
       </wa-card>
     </a>
     `)}

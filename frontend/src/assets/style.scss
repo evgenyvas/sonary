@@ -204,3 +204,128 @@ main {
   padding: 0 !important; 
   overflow: visible !important;
 }
+.play-button-list>wa-icon {
+  font-size: 2.5rem;
+}
+.play-button-single {
+  margin-left: 1rem;
+  margin-top: 1.2rem;
+  margin-bottom: 1.2rem;
+}
+.play-button-single>wa-icon {
+  font-size: 6rem;
+}
+.play-button-list>wa-icon:hover, .play-button-single>wa-icon:hover {
+  color: var(--wa-color-text-link);
+}
+.cover-list {
+  min-width: 68px;
+  height: 0;
+  margin-top: -67px;
+}
+.cover-list-albums {
+  width: 55px;
+  height: 0;
+  margin-top: -54px;
+}
+.cover-list img, .cover-list-albums img {
+  border-radius: 0;
+}
+.album-year {
+  min-width: 2.2rem;
+}
+.track-number {
+  min-width: 1.1rem;
+}
+wa-carousel {
+  width: 754px;
+  height: 100%;
+  margin: 0 auto;
+  --wa-border-radius-l: 0px;
+  --wa-border-radius-m: 0px;
+}
+wa-carousel::part(scroll-container) {
+  height: 640px;
+}
+wa-carousel-item {
+  display: flex !important;
+  justify-content: center;
+  align-items: center;
+}
+.img-container {
+  width: 640px;
+  height: 640px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: #f5f5f5;
+  box-sizing: border-box;
+}
+.img-container img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 0;
+}
+.img-dialog {
+  --width: 40vw;
+}
+.img-dialog img {
+  border-radius: 0;
+}
+.img-cover img {
+  border-radius: 0;
+}
+.img-logo img {
+  border-radius: 0;
+}
+@media (max-width: 1996px) {
+  .img-dialog {
+    --width: 50vw;
+  }
+}
+@media (max-width: 1747px) {
+  .img-dialog {
+    --width: 70vw;
+  }
+}
+@media (max-width: 1254px) {
+  .img-dialog {
+    --width: 100vw;
+  }
+}
+.dialog-content, .drawer-content {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+}
+@media (max-width: 768px) {
+  wa-carousel {
+    width: 100%; 
+    height: auto;
+    aspect-ratio: 1 / 1;
+  }
+
+  .img-container {
+    width: 100%;
+    height: 100%;
+  }
+  
+  .img-container img {
+    max-width: 100%;
+    max-height: 100%;
+  }
+}
+.fullscreen-drawer {
+  --size: 100vh;
+}
+.fullscreen-drawer::part(panel) {
+  height: 100vh !important;
+  max-height: 100vh !important;
+  border-radius: 0 !important;
+}
+.fullscreen-drawer::part(body) {
+  padding: 0;
+}

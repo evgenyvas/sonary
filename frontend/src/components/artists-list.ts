@@ -1,5 +1,5 @@
 import SonaryLitElement from '@/base'
-import { html } from 'lit'
+import { html, nothing } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { repeat } from 'lit/directives/repeat.js'
 import type { Artist } from '@/types'
@@ -88,9 +88,11 @@ export class ArtistsList extends SonaryLitElement {
     ${repeat(this._items, (item: Artist) => item.id, (item: Artist, index: number) => html`
     <a class="hover-grow hover-emphasize-border" href="${this.baseRoute + "artists/" + item.id}">
       <wa-card appearance="outlined" orientation="vertical" data-key="${index}">
-        <span class="wa-flank">
-          <span>${item.name}</span>
-        </span>
+        ${item.logo?.["160"] ? html`
+            <span slot="media" class="wa-text-center">
+                <img src="${item.logo["160"]}" alt="${item.name}">
+            </span>` : nothing}
+        <span>${item.name}</span>
       </wa-card>
     </a>
     `)}

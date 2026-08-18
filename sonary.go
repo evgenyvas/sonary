@@ -199,12 +199,27 @@ func (api *API) UpdateTrack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	images, err := database.GetImages(api.readDB, lib.ImagesGetParams{
+		DirectoryIDs: []int{track.DirectoryID},
+		Type:         utils.Ptr(lib.ImageTypeMainFront),
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	apiTrack := lib.APITrackSingle{
 		APIStatus: lib.APIStatus{
 			Status:  http.StatusOK,
 			Message: "ok",
 		},
 		APITrack: track.ToAPI(),
+	}
+
+	if img, ok := images[track.DirectoryID]; ok {
+		if len(img) > 0 {
+			apiTrack.Cover = lib.ImageURLs(&img[0], lib.ImageTypeMainFront)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -540,7 +555,14 @@ func (api *API) GetAlbum(w http.ResponseWriter, r *http.Request) {
 
 	apiTracks := make([]lib.APITrack, len(tracks))
 	for i, track := range tracks {
-		apiTracks[i] = track.ToAPI()
+		apiTrack := track.ToAPI()
+		for _, img := range images {
+			if img.Type == lib.ImageTypeMainFront {
+				apiTrack.Cover = lib.ImageURLs(&img, img.Type)
+				break
+			}
+		}
+		apiTracks[i] = apiTrack
 	}
 
 	apiAlbum := lib.APIAlbumSingle{

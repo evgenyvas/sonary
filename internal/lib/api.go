@@ -150,10 +150,10 @@ type APIAlbum struct {
 	ID         int           `json:"id"`
 	Artist     string        `json:"artist"`
 	ArtistID   int           `json:"artist_id"`
-	ArtistLogo APIImageSizes `json:"artist_logo"`
+	ArtistLogo APIImageSizes `json:"artist_logo,omitempty"`
 	Title      string        `json:"title"`
 	Year       int           `json:"year"`
-	Cover      APIImageSizes `json:"cover"`
+	Cover      APIImageSizes `json:"cover,omitempty"`
 	Images     []APIImage    `json:"images"`
 }
 

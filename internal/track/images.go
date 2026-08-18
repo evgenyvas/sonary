@@ -3,6 +3,8 @@ package track
 import (
 	"fmt"
 	"image"
+	"image/color"
+	stdDraw "image/draw"
 	"image/jpeg"
 	_ "image/png"
 	"io/fs"
@@ -374,12 +376,34 @@ func saveJPEG(dstPath string, img image.Image, mtime int64) error {
 		return err
 	}
 
+	// create an opaque white background
+	bounds := img.Bounds()
+	dst := image.NewRGBA(bounds)
+
+	stdDraw.Draw(
+		dst,
+		bounds,
+		image.NewUniform(color.White),
+		image.Point{},
+		stdDraw.Src,
+	)
+
+	// draw the original image over the white background
+	// this removes transparency correctly
+	stdDraw.Draw(
+		dst,
+		bounds,
+		img,
+		bounds.Min,
+		stdDraw.Over,
+	)
+
 	out, err := os.Create(dstPath)
 	if err != nil {
 		return err
 	}
 
-	if err := jpeg.Encode(out, img, &jpeg.Options{
+	if err := jpeg.Encode(out, dst, &jpeg.Options{
 		Quality: thumbnailJPEGQuality,
 	}); err != nil {
 		out.Close()

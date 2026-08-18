@@ -53,6 +53,11 @@ func SyncDirectories() (map[string]any, error) {
 				return err
 			}
 			if d.IsDir() {
+				// Covers is handled by DirectoryScanner of the parent directory
+				// do not add it as a separate directory and do not scan anything inside it
+				if strings.EqualFold(d.Name(), CoversDir) {
+					return filepath.SkipDir
+				}
 				return nil
 			}
 			ok, fileType := checkRelevantFile(d.Name())

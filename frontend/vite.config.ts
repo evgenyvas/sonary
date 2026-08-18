@@ -10,7 +10,7 @@ const config = {
 }
 
 export default ({ mode }: { mode: string }) => {
-    const { VITE_HOST, VITE_PORT, VITE_BASE_URL, NODE_ENV } = loadEnv(mode, process.cwd(), '')
+    const { VITE_HOST, VITE_PORT, VITE_BASE_URL, VITE_API_HOST, NODE_ENV } = loadEnv(mode, process.cwd(), '')
 
     return defineConfig({
         base: VITE_BASE_URL,
@@ -31,7 +31,12 @@ export default ({ mode }: { mode: string }) => {
             host: VITE_HOST,
             open: false,
             cors: true,
-            proxy: {},
+            proxy: {
+                '/api': {
+                    target: VITE_API_HOST,
+                    changeOrigin: true,
+                },
+            },
             hmr: {
                 host: VITE_HOST,
                 port: 3102,

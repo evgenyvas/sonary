@@ -1,3 +1,11 @@
+export interface Image {
+    url: string,
+    type: string,
+    order: number,
+}
+
+type ImageSizes = { [key: number]: string }
+
 interface RelatedArtist {
     id: number,
     name: string,
@@ -6,16 +14,21 @@ interface RelatedArtist {
 export interface Artist {
     id: number,
     name: string,
-    related: RelatedArtist[]
+    logo?: ImageSizes,
+    images: Image[],
+    related: RelatedArtist[],
 }
 
 export interface Album {
     id: number,
     artist: string,
     artist_id: number,
+    artist_logo?: ImageSizes,
     title: string,
     year: number,
     tracks: Track[],
+    cover?: ImageSizes,
+    images: Image[],
 }
 
 export interface Track {
@@ -29,6 +42,7 @@ export interface Track {
     genre: string,
     album: string,
     album_id: number,
+    cover?: ImageSizes,
     number: number,
     duration: number,
     pregap: boolean,
