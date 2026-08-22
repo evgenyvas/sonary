@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"runtime/debug"
 	"slices"
 	"sonary/internal/database"
 	"sonary/internal/ffmpeg"
@@ -286,7 +287,8 @@ func StartWorkerPool(ctx context.Context, db *sql.DB, workerCount int) {
 		go func(workerID int) {
 			defer func() {
 				if r := recover(); r != nil {
-					log.Printf("worker %d panic: %v", workerID, r)
+					//log.Printf("worker %d panic: %v", workerID, r)
+					log.Printf("worker %d panic: %v\n%s", workerID, r, debug.Stack())
 				}
 			}()
 

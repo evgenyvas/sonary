@@ -160,7 +160,8 @@ func initDatabase(db DBTX) {
 
 				CREATE TABLE images (
 				id INTEGER PRIMARY KEY,
-				directory_id INTEGER NOT NULL,
+				directory_id INTEGER,
+				track_id INTEGER,
 				artist_id INTEGER,
 				path TEXT NOT NULL,
 				type INTEGER NOT NULL,
@@ -172,9 +173,11 @@ func initDatabase(db DBTX) {
 				mtime INTEGER,
 				FOREIGN KEY (directory_id)
 				REFERENCES directories(id),
+				FOREIGN KEY (track_id)
+				REFERENCES tracks(id)
+				ON DELETE CASCADE,
 				FOREIGN KEY (artist_id)
-				REFERENCES artists(id),
-				UNIQUE(directory_id, path)
+				REFERENCES artists(id)
 				);
 				`)
 			if err != nil {

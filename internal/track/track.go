@@ -164,17 +164,20 @@ func FormatTrackDuration(duration time.Duration) string {
 }
 
 type DirectoryScanner struct {
-	Path           string
-	Dir            *lib.DirDB
-	DB             *sql.DB
-	Entries        []os.DirEntry
-	FF             *ffmpeg.FFmpeg
-	SkipFiles      map[string]struct{}
-	Images         []lib.Image
-	ImageOrder     int
-	Thumbnails     ThumbnailGenerator
-	MainFrontFound bool
-	ArtistID       *int
+	Path             string
+	Dir              *lib.DirDB
+	DB               *sql.DB
+	Entries          []os.DirEntry
+	FF               *ffmpeg.FFmpeg
+	SkipFiles        map[string]struct{}
+	Images           []lib.Image
+	EmbeddedImages   []EmbeddedImage
+	EmbeddedTrackIDs []int
+	ScannedTrackIDs  []int
+	ImageOrder       int
+	Thumbnails       ThumbnailGenerator
+	MainFrontFound   bool
+	ArtistID         *int
 }
 
 func NewDirectoryScanner(path string) (*DirectoryScanner, error) {
@@ -296,6 +299,7 @@ func (s *DirectoryScanner) saveTracks(tracks []*lib.Track) error {
 		if err != nil {
 			return err
 		}
+		s.ScannedTrackIDs = append(s.ScannedTrackIDs, track.ID)
 		if s.ArtistID == nil {
 			s.ArtistID = &albumArtistID
 		}

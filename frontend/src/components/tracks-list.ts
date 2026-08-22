@@ -168,10 +168,10 @@ export class TracksList extends SonaryLitElement {
                   .fullUrl="${item.cover?.["640"]}"
                   .altText="${item.title}"></sonary-cover-dialog>
         </span>
-        <span>${item.artist}</span>
+        <span><a href="${this.baseRoute + 'artists/' + item.artist_id}">${item.artist}</a></span>
       </span>
       <span class="wa-flank">
-        <span>${item.album}</span>
+        <span><a href="${this.baseRoute + 'albums/' + item.album_id}">${item.album}</a></span>
       </span>
       <span class="wa-flank">
         <span>${item.genre}</span>
@@ -180,7 +180,7 @@ export class TracksList extends SonaryLitElement {
       <span class="wa-cluster wa-justify-content-end">
         ${this.albumId && this._showArtist ? html`
         <span class="wa-flank">
-          <span>${item.artist}</span>
+          <span><a href="${this.baseRoute + 'artists/' + item.artist_id}">${item.artist}</a></span>
         </span>
         ` : ''}
         ${item.lyrics ?

@@ -94,14 +94,16 @@ type TrackDB struct {
 }
 
 type TracksGetParams struct {
-	ID       *int
-	AlbumID  *int
-	ArtistID *int
-	Random   bool
-	Limit    int
-	Page     *int
-	Like     *bool
-	NoAlbum  bool
+	ID          *int
+	AlbumID     *int
+	ArtistID    *int
+	DirectoryID *int
+	Path        *string
+	Random      bool
+	Limit       int
+	Page        *int
+	Like        *bool
+	NoAlbum     bool
 }
 
 type TrackUpdateParams struct {
@@ -156,6 +158,7 @@ const (
 	ImageTypeInside
 	ImageTypeDigipack
 	ImageTypeSlipcase
+	ImageTypeSticker
 	ImageTypeOther
 )
 
@@ -190,7 +193,8 @@ func (t ImageType) String() string {
 
 type Image struct {
 	ID          int
-	DirectoryID int
+	DirectoryID *int
+	TrackID     *int
 	ArtistID    *int
 	Path        string
 	FullPath    string
@@ -201,6 +205,7 @@ type Image struct {
 	Height      int
 	Size        int64
 	Mtime       int64
+	Embedded    bool
 }
 
 type ImageGroupBy int
@@ -208,10 +213,12 @@ type ImageGroupBy int
 const (
 	ImageGroupByDirectory ImageGroupBy = iota
 	ImageGroupByArtist
+	ImageGroupByTrack
 )
 
 type ImagesGetParams struct {
 	DirectoryIDs []int
+	TrackIDs     []int
 	ArtistIDs    []int
 	Type         *ImageType
 	GroupBy      ImageGroupBy

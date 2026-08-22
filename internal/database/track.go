@@ -438,20 +438,26 @@ func GetAlbumKey(artistName string, albumName string) string {
 
 func GetOrAddAlbum(db DBTX, artistID int, track *lib.Track) (int, error) {
 	ct := lib.GetImportContext()
-	id, ok := ct.AlbumCache[GetAlbumKey(track.Artist, track.Album)]
+	albumArtist := utils.FirstNonEmpty(
+		track.AlbumArtist,
+		track.Artist,
+		"Unknown Artist",
+	)
+	key := GetAlbumKey(albumArtist, track.Album)
+	id, ok := ct.AlbumCache[key]
 	if !ok {
 		album, err := GetAlbum(db, lib.AlbumsGetParams{
-			ArtistID: utils.Ptr(artistID), Title: utils.Ptr(track.Album),
+			ArtistID: utils.Ptr(artistID),
+			Title:    utils.Ptr(track.Album),
 		})
 		if err != nil {
 			if errors.Is(err, ErrAlbumNotFound) {
-				artistInput := &lib.Album{
-					ID:       track.ID,
+				albumInput := &lib.Album{
 					ArtistID: artistID,
 					Title:    track.Album,
 					Year:     track.Year,
 				}
-				album, err = SaveAlbum(db, artistInput)
+				album, err = SaveAlbum(db, albumInput)
 				if err != nil {
 					return 0, err
 				}
@@ -461,7 +467,7 @@ func GetOrAddAlbum(db DBTX, artistID int, track *lib.Track) (int, error) {
 		}
 		id = album.ID
 		if ct.AlbumCache != nil {
-			ct.AlbumCache[GetAlbumKey(track.Artist, track.Album)] = id
+			ct.AlbumCache[key] = id
 		}
 	}
 	return id, nil
@@ -515,14 +521,16 @@ func SaveTrack(db DBTX, dirID int, artistID int, track *lib.Track) (*lib.Track, 
 	return track, nil
 }
 
-func SaveImage(db DBTX, dirID int, img *lib.Image) (*lib.Image, error) {
+func SaveImage(db DBTX, img *lib.Image) (*lib.Image, error) {
 	err := db.QueryRow(`
 		INSERT INTO images (
-			directory_id, artist_id, path, type, format, sort_order, width, height, size, mtime
+			directory_id, track_id, artist_id, path, type, format,
+			sort_order, width, height, size, mtime
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		RETURNING id`,
-		dirID, img.ArtistID, img.Path, img.Type, img.Format, img.Order, img.Width, img.Height, img.Size, img.Mtime,
+		img.DirectoryID, img.TrackID, img.ArtistID, img.Path, img.Type, img.Format,
+		img.Order, img.Width, img.Height, img.Size, img.Mtime,
 	).Scan(&img.ID)
 	if err != nil {
 		return nil, err
@@ -531,7 +539,9 @@ func SaveImage(db DBTX, dirID int, img *lib.Image) (*lib.Image, error) {
 }
 
 func getImages(db DBTX, params lib.ImagesGetParams) ([]lib.Image, error) {
-	if len(params.DirectoryIDs) == 0 && len(params.ArtistIDs) == 0 {
+	if len(params.DirectoryIDs) == 0 &&
+		len(params.TrackIDs) == 0 &&
+		len(params.ArtistIDs) == 0 {
 		return []lib.Image{}, nil
 	}
 
@@ -540,7 +550,7 @@ func getImages(db DBTX, params lib.ImagesGetParams) ([]lib.Image, error) {
 	var args []any
 
 	sb.WriteString(`
-		SELECT id, directory_id, artist_id, path, type, format,
+		SELECT id, directory_id, track_id, artist_id, path, type, format,
 			sort_order, width, height, size, mtime
 		FROM images
 	`)
@@ -557,6 +567,21 @@ func getImages(db DBTX, params lib.ImagesGetParams) ([]lib.Image, error) {
 		conditions = append(
 			conditions,
 			"directory_id IN ("+strings.Join(placeholders, ",")+")",
+		)
+	}
+
+	// Track IDs
+	if len(params.TrackIDs) > 0 {
+		placeholders := make([]string, len(params.TrackIDs))
+
+		for i, id := range params.TrackIDs {
+			placeholders[i] = "?"
+			args = append(args, id)
+		}
+
+		conditions = append(
+			conditions,
+			"track_id IN ("+strings.Join(placeholders, ",")+")",
 		)
 	}
 
@@ -602,7 +627,7 @@ func getImages(db DBTX, params lib.ImagesGetParams) ([]lib.Image, error) {
 		var img lib.Image
 
 		if err := rows.Scan(
-			&img.ID, &img.DirectoryID, &img.ArtistID, &img.Path, &img.Type, &img.Format,
+			&img.ID, &img.DirectoryID, &img.TrackID, &img.ArtistID, &img.Path, &img.Type, &img.Format,
 			&img.Order, &img.Width, &img.Height, &img.Size, &img.Mtime,
 		); err != nil {
 			return nil, err
@@ -641,7 +666,16 @@ func GetImages(db DBTX, params lib.ImagesGetParams) (map[int][]lib.Image, error)
 			key = *img.ArtistID
 
 		case lib.ImageGroupByDirectory:
-			key = img.DirectoryID
+			if img.DirectoryID == nil {
+				continue
+			}
+			key = *img.DirectoryID
+
+		case lib.ImageGroupByTrack:
+			if img.TrackID == nil {
+				continue
+			}
+			key = *img.TrackID
 
 		default:
 			return nil, fmt.Errorf("unsupported image group: %d", params.GroupBy)
@@ -715,6 +749,20 @@ func GetTrack(db *sql.DB, ID int) (*lib.TrackDB, error) {
 	return &tracks[0], nil
 }
 
+func GetTrackByPath(db *sql.DB, path string) (*lib.TrackDB, error) {
+	tracks, _, err := GetTracks(db, lib.TracksGetParams{
+		Path:  utils.Ptr(path),
+		Limit: 1,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(tracks) != 1 {
+		return nil, ErrTrackNotFound
+	}
+	return &tracks[0], nil
+}
+
 func GetTracks(db *sql.DB, params lib.TracksGetParams) ([]lib.TrackDB, bool, error) {
 	var sb strings.Builder
 
@@ -746,6 +794,14 @@ func GetTracks(db *sql.DB, params lib.TracksGetParams) ([]lib.TrackDB, bool, err
 		if params.ArtistID != nil {
 			conditions = append(conditions, "t.artist_id = ?")
 			args = append(args, *params.ArtistID)
+		}
+		if params.DirectoryID != nil {
+			conditions = append(conditions, "t.directory_id = ?")
+			args = append(args, *params.DirectoryID)
+		}
+		if params.Path != nil {
+			conditions = append(conditions, "t.path = ?")
+			args = append(args, *params.Path)
 		}
 		if params.Like != nil {
 			conditions = append(conditions, "t.is_like = ?")
@@ -785,9 +841,6 @@ func GetTracks(db *sql.DB, params lib.TracksGetParams) ([]lib.TrackDB, bool, err
 
 	rows, err := db.Query(sb.String(), args...)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, false, nil
-		}
 		return nil, false, err
 	}
 	defer rows.Close()
@@ -927,9 +980,6 @@ func GetArtists(db DBTX, params lib.ArtistsGetParams) ([]lib.ArtistDB, bool, err
 
 	rows, err := db.Query(sb.String(), args...)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, false, nil
-		}
 		return nil, false, err
 	}
 	defer rows.Close()
@@ -1025,9 +1075,6 @@ func GetAlbums(db DBTX, params lib.AlbumsGetParams) ([]lib.AlbumDB, bool, error)
 
 	rows, err := db.Query(sb.String(), args...)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, false, nil
-		}
 		return nil, false, err
 	}
 	defer rows.Close()

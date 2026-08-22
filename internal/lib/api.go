@@ -216,13 +216,21 @@ type APITrackPlayPost struct {
 	TrackIDs []int  `json:"track_ids"`
 }
 
-func ThumbnailFilename(img *Image, size int) string {
+func ThumbnailFilename(img *Image) string {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(img.Path))
 
+	if img.DirectoryID == nil {
+		return fmt.Sprintf(
+			"embedded_%02d_%016x.jpg",
+			img.Type,
+			h.Sum64(),
+		)
+	}
+
 	return fmt.Sprintf(
 		"%d_%02d_%016x.jpg",
-		img.DirectoryID,
+		*img.DirectoryID,
 		img.Type,
 		h.Sum64(),
 	)
@@ -231,7 +239,7 @@ func ThumbnailFilename(img *Image, size int) string {
 func ThumbnailURL(img *Image, size int) string {
 	return "/api/v1/images/" +
 		strconv.Itoa(size) + "/" +
-		ThumbnailFilename(img, size)
+		ThumbnailFilename(img)
 }
 
 func ImageURLs(img *Image, tp ImageType) APIImageSizes {

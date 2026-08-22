@@ -1,6 +1,8 @@
 package track
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -16,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dhowden/tag"
 	"golang.org/x/image/draw"
 )
 
@@ -28,6 +31,12 @@ type ImageKeyword struct {
 
 type ThumbnailGenerator struct {
 	CacheDir string
+}
+
+type EmbeddedImage struct {
+	Image lib.Image
+	Data  []byte
+	Ext   string
 }
 
 // order matters - the first matching keyword wins
@@ -45,6 +54,7 @@ var imageKeywords = []ImageKeyword{
 	{"inside", lib.ImageTypeInside},
 	{"digi", lib.ImageTypeDigipack},
 	{"slip", lib.ImageTypeSlipcase},
+	{"sticker", lib.ImageTypeSticker},
 }
 
 func isArtistLogo(name string) bool {
@@ -93,7 +103,261 @@ func (s *DirectoryScanner) processImages() error {
 		}
 	}
 	//fmt.Printf("%#v\n", s.Images)
-	return s.syncImages()
+	if err := s.syncImages(); err != nil {
+		return err
+	}
+
+	// embedded images are synced for all tracks in the directory
+	// if MainFront exists, we don't extract new embedded images,
+	// but old embedded images still need to be removed
+	s.EmbeddedTrackIDs = append(s.EmbeddedTrackIDs, s.ScannedTrackIDs...)
+
+	// check embedded
+	if !s.MainFrontFound {
+		if err := s.processEmbeddedImages(); err != nil {
+			return err
+		}
+	}
+	return s.syncEmbeddedImages()
+}
+
+func (s *DirectoryScanner) processEmbeddedImages() error {
+	for _, entry := range s.Entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		ext := strings.ToLower(filepath.Ext(entry.Name()))
+
+		switch ext {
+		case ".mp3", ".flac", ".ogg", ".m4a", ".wav":
+		default:
+			continue
+		}
+
+		fullPath := filepath.Join(s.Path, entry.Name())
+
+		pictures, err := extractEmbeddedImages(fullPath)
+		if err != nil {
+			log.Printf("Embedded image error '%s': %v", fullPath, err)
+			continue
+		}
+		if len(pictures) == 0 {
+			continue
+		}
+
+		// get track by path
+		track, err := database.GetTrackByPath(s.DB, fullPath)
+		if err != nil {
+			return err
+		}
+		if track == nil {
+			log.Printf("Embedded image: track not found '%s'\n", fullPath)
+			continue
+		}
+
+		for _, embedded := range pictures {
+			if embedded.Ext == "" {
+				return fmt.Errorf("unsupported embedded image format: track_id=%d", track.ID)
+			}
+			img, err := s.buildEmbeddedImage(*track, embedded)
+			if err != nil {
+				log.Printf("Embedded image error: %v", err)
+				continue
+			}
+			embedded.Image = *img
+			s.EmbeddedImages = append(s.EmbeddedImages, embedded)
+		}
+	}
+	return nil
+}
+
+func (s *DirectoryScanner) syncEmbeddedImages() error {
+	trackIDs := s.EmbeddedTrackIDs
+	if len(trackIDs) == 0 {
+		return nil
+	}
+
+	oldImages, err := database.GetImagesFlat(s.DB, lib.ImagesGetParams{
+		TrackIDs: trackIDs,
+	})
+	if err != nil {
+		return err
+	}
+
+	oldByTrack := make(map[int]lib.Image)
+
+	for _, img := range oldImages {
+		if img.TrackID == nil {
+			continue
+		}
+		oldByTrack[*img.TrackID] = img
+	}
+
+	newByTrack := make(map[int]lib.Image)
+
+	for _, img := range s.EmbeddedImages {
+		if img.Image.TrackID == nil {
+			continue
+		}
+		newByTrack[*img.Image.TrackID] = img.Image
+	}
+
+	var imagesToDelete []lib.Image
+	var imagesToSave []EmbeddedImage
+
+	// old images
+	for _, oldImg := range oldImages {
+		if oldImg.TrackID == nil {
+			continue
+		}
+
+		trackID := *oldImg.TrackID
+		newImg, exists := newByTrack[trackID]
+
+		// embedded picture is not more exists
+		if !exists {
+			imagesToDelete = append(imagesToDelete, oldImg)
+			continue
+		}
+
+		// embedded picture is changed
+		if oldImg.Mtime != newImg.Mtime ||
+			oldImg.Size != newImg.Size ||
+			oldImg.Format != newImg.Format {
+			imagesToDelete = append(imagesToDelete, oldImg)
+		}
+	}
+
+	// new / changed
+	for _, newImg := range s.EmbeddedImages {
+		if newImg.Image.TrackID == nil {
+			continue
+		}
+
+		trackID := *newImg.Image.TrackID
+
+		oldImg, exists := oldByTrack[trackID]
+
+		if !exists {
+			imagesToSave = append(imagesToSave, newImg)
+			continue
+		}
+
+		if oldImg.Mtime != newImg.Image.Mtime ||
+			oldImg.Size != newImg.Image.Size ||
+			oldImg.Format != newImg.Image.Format {
+			imagesToSave = append(imagesToSave, newImg)
+		}
+	}
+
+	if len(imagesToDelete) == 0 && len(imagesToSave) == 0 {
+		return nil
+	}
+
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, img := range imagesToDelete {
+		if err := database.DeleteImage(tx, img.ID); err != nil {
+			return err
+		}
+	}
+
+	for i := range imagesToSave {
+		if _, err := database.SaveImage(tx, &imagesToSave[i].Image); err != nil {
+			return err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	// delete old files
+	for _, img := range imagesToDelete {
+		if err := os.Remove(img.FullPath); err != nil && !os.IsNotExist(err) {
+			log.Printf("Embedded image delete error '%s': %v", img.FullPath, err)
+		}
+	}
+
+	// save new embedded images
+	for _, img := range imagesToSave {
+		if err := s.writeEmbeddedImage(&img); err != nil {
+			log.Printf("Embedded image write error '%s': %v", img.Image.FullPath, err)
+		}
+	}
+
+	if len(imagesToSave) > 0 {
+		imgs := make([]lib.Image, 0, len(imagesToSave))
+		for _, img := range imagesToSave {
+			imgs = append(imgs, img.Image)
+		}
+		if err := s.Thumbnails.Generate(imgs); err != nil {
+			log.Printf("Embedded thumbnail error: %v", err)
+		}
+	}
+
+	return nil
+}
+
+func (s *DirectoryScanner) buildEmbeddedImage(
+	track lib.TrackDB,
+	embedded EmbeddedImage,
+) (*lib.Image, error) {
+	if embedded.Ext == "" {
+		return nil, fmt.Errorf("embedded image has no extension: track_id=%d", track.ID)
+	}
+
+	audioInfo, err := os.Stat(track.Path)
+	if err != nil {
+		return nil, err
+	}
+
+	mtime := audioInfo.ModTime().Unix()
+
+	path := s.embeddedImagePath(track.ID, embedded.Ext)
+
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(embedded.Data))
+	if err != nil {
+		return nil, err
+	}
+
+	return &lib.Image{
+		TrackID:     &track.ID,
+		DirectoryID: nil,
+		Path:        filepath.Join("embedded", filepath.Base(path)),
+		FullPath:    path,
+		Type:        lib.ImageTypeMainFront,
+		Format:      format,
+		Order:       0,
+		Width:       cfg.Width,
+		Height:      cfg.Height,
+		Size:        int64(len(embedded.Data)),
+		Mtime:       mtime,
+	}, nil
+}
+
+func (s *DirectoryScanner) embeddedImagePath(trackID int, ext string) string {
+	return filepath.Join(
+		s.Thumbnails.CacheDir,
+		"embedded",
+		fmt.Sprintf("track-%d.%s", trackID, ext),
+	)
+}
+
+func (s *DirectoryScanner) writeEmbeddedImage(img *EmbeddedImage) error {
+	if err := os.MkdirAll(filepath.Dir(img.Image.FullPath), 0755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(img.Image.FullPath, img.Data, 0644); err != nil {
+		return err
+	}
+	mtime := time.Unix(img.Image.Mtime, 0)
+	return os.Chtimes(img.Image.FullPath, mtime, mtime)
 }
 
 func (s *DirectoryScanner) checkImage(entry os.DirEntry, relImgPath string, inCovers bool) error {
@@ -110,7 +374,7 @@ func (s *DirectoryScanner) checkImage(entry os.DirEntry, relImgPath string, inCo
 			return err
 		}
 		s.Images = append(s.Images, lib.Image{
-			DirectoryID: s.Dir.ID,
+			DirectoryID: &s.Dir.ID,
 			Path:        relImgPath,
 			FullPath:    fullPath,
 			Type:        s.detectImageType(entry.Name(), inCovers),
@@ -250,7 +514,7 @@ func (s *DirectoryScanner) syncImages() error {
 		if imagesToSave[i].Type == lib.ImageTypeArtistLogo {
 			imagesToSave[i].ArtistID = s.ArtistID
 		}
-		if _, err := database.SaveImage(tx, s.Dir.ID, &imagesToSave[i]); err != nil {
+		if _, err := database.SaveImage(tx, &imagesToSave[i]); err != nil {
 			return err
 		}
 	}
@@ -422,7 +686,7 @@ func (g *ThumbnailGenerator) thumbnailPath(img *lib.Image, size int) string {
 	return filepath.Join(
 		g.CacheDir,
 		fmt.Sprintf("%d", size),
-		lib.ThumbnailFilename(img, size),
+		lib.ThumbnailFilename(img),
 	)
 }
 
@@ -438,4 +702,50 @@ func (g *ThumbnailGenerator) Delete(img *lib.Image) error {
 		}
 	}
 	return nil
+}
+
+func extractEmbeddedImages(path string) ([]EmbeddedImage, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	meta, err := tag.ReadFrom(f)
+	if err != nil {
+		if errors.Is(err, tag.ErrNoTagsFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	picture := meta.Picture()
+	if picture == nil || len(picture.Data) == 0 {
+		return nil, nil
+	}
+
+	return []EmbeddedImage{
+		{
+			Data: picture.Data,
+			Ext:  embeddedImageExt(picture),
+		},
+	}, nil
+}
+
+func embeddedImageExt(picture *tag.Picture) string {
+	ext := strings.TrimPrefix(strings.ToLower(picture.Ext), ".")
+	switch ext {
+	case "jpg", "jpeg":
+		return "jpg"
+	case "png":
+		return "png"
+	}
+	switch strings.ToLower(picture.MIMEType) {
+	case "image/jpeg":
+		return "jpg"
+	case "image/png":
+		return "png"
+	default:
+		return ""
+	}
 }

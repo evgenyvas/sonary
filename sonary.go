@@ -81,18 +81,31 @@ func (api *API) GetTracks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	directoryIDs := make([]int, 0, len(tracks))
-	seen := make(map[int]struct{})
+	trackIDs := make([]int, 0, len(tracks))
+	seenDirectories := make(map[int]struct{})
+
 	for _, track := range tracks {
-		if _, ok := seen[track.DirectoryID]; ok {
+		trackIDs = append(trackIDs, track.ID)
+		if _, ok := seenDirectories[track.DirectoryID]; ok {
 			continue
 		}
-		seen[track.DirectoryID] = struct{}{}
+		seenDirectories[track.DirectoryID] = struct{}{}
 		directoryIDs = append(directoryIDs, track.DirectoryID)
 	}
 
-	images, err := database.GetImages(api.readDB, lib.ImagesGetParams{
+	directoryImages, err := database.GetImages(api.readDB, lib.ImagesGetParams{
 		DirectoryIDs: directoryIDs,
 		Type:         utils.Ptr(lib.ImageTypeMainFront),
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	embeddedImages, err := database.GetImages(api.readDB, lib.ImagesGetParams{
+		TrackIDs: trackIDs,
+		Type:     utils.Ptr(lib.ImageTypeMainFront),
+		GroupBy:  lib.ImageGroupByTrack,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -102,9 +115,16 @@ func (api *API) GetTracks(w http.ResponseWriter, r *http.Request) {
 	apiTracks := make([]lib.APITrack, len(tracks))
 	for i, track := range tracks {
 		apiTrack := track.ToAPI()
-		if img, ok := images[track.DirectoryID]; ok {
+		if img, ok := directoryImages[track.DirectoryID]; ok {
 			if len(img) > 0 {
 				apiTrack.Cover = lib.ImageURLs(&img[0], lib.ImageTypeMainFront)
+			}
+		}
+		if apiTrack.Cover == nil {
+			if imgs, ok := embeddedImages[track.ID]; ok {
+				if len(imgs) > 0 {
+					apiTrack.Cover = lib.ImageURLs(&imgs[0], lib.ImageTypeMainFront)
+				}
 			}
 		}
 		apiTracks[i] = apiTrack
@@ -142,7 +162,7 @@ func (api *API) GetTrack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	images, err := database.GetImages(api.readDB, lib.ImagesGetParams{
+	directoryImages, err := database.GetImages(api.readDB, lib.ImagesGetParams{
 		DirectoryIDs: []int{track.DirectoryID},
 		Type:         utils.Ptr(lib.ImageTypeMainFront),
 	})
@@ -159,9 +179,25 @@ func (api *API) GetTrack(w http.ResponseWriter, r *http.Request) {
 		APITrack: track.ToAPI(),
 	}
 
-	if img, ok := images[track.DirectoryID]; ok {
+	if img, ok := directoryImages[track.DirectoryID]; ok {
 		if len(img) > 0 {
 			apiTrack.Cover = lib.ImageURLs(&img[0], lib.ImageTypeMainFront)
+		}
+	}
+	if apiTrack.Cover == nil {
+		embeddedImages, err := database.GetImages(api.readDB, lib.ImagesGetParams{
+			TrackIDs: []int{track.ID},
+			Type:     utils.Ptr(lib.ImageTypeMainFront),
+			GroupBy:  lib.ImageGroupByTrack,
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if img, ok := embeddedImages[track.ID]; ok {
+			if len(img) > 0 {
+				apiTrack.Cover = lib.ImageURLs(&img[0], lib.ImageTypeMainFront)
+			}
 		}
 	}
 
@@ -199,7 +235,7 @@ func (api *API) UpdateTrack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	images, err := database.GetImages(api.readDB, lib.ImagesGetParams{
+	directoryImages, err := database.GetImages(api.readDB, lib.ImagesGetParams{
 		DirectoryIDs: []int{track.DirectoryID},
 		Type:         utils.Ptr(lib.ImageTypeMainFront),
 	})
@@ -216,9 +252,25 @@ func (api *API) UpdateTrack(w http.ResponseWriter, r *http.Request) {
 		APITrack: track.ToAPI(),
 	}
 
-	if img, ok := images[track.DirectoryID]; ok {
+	if img, ok := directoryImages[track.DirectoryID]; ok {
 		if len(img) > 0 {
 			apiTrack.Cover = lib.ImageURLs(&img[0], lib.ImageTypeMainFront)
+		}
+	}
+	if apiTrack.Cover == nil {
+		embeddedImages, err := database.GetImages(api.readDB, lib.ImagesGetParams{
+			TrackIDs: []int{track.ID},
+			Type:     utils.Ptr(lib.ImageTypeMainFront),
+			GroupBy:  lib.ImageGroupByTrack,
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if img, ok := embeddedImages[track.ID]; ok {
+			if len(img) > 0 {
+				apiTrack.Cover = lib.ImageURLs(&img[0], lib.ImageTypeMainFront)
+			}
 		}
 	}
 
@@ -449,7 +501,7 @@ func (api *API) GetAlbums(w http.ResponseWriter, r *http.Request) {
 		directoryIDs = append(directoryIDs, dirs...)
 	}
 
-	images, err := database.GetImages(api.readDB, lib.ImagesGetParams{
+	directoryImages, err := database.GetImages(api.readDB, lib.ImagesGetParams{
 		DirectoryIDs: directoryIDs,
 	})
 	if err != nil {
@@ -471,7 +523,7 @@ func (api *API) GetAlbums(w http.ResponseWriter, r *http.Request) {
 		}
 		if dirs, ok := albumDirectories[album.ID]; ok {
 			for _, dirID := range dirs {
-				if dirImg, ok := images[dirID]; ok {
+				if dirImg, ok := directoryImages[dirID]; ok {
 					for _, img := range dirImg {
 						if img.Type == lib.ImageTypeMainFront {
 							apiAlbum.Cover = lib.ImageURLs(&img, img.Type)
@@ -482,6 +534,34 @@ func (api *API) GetAlbums(w http.ResponseWriter, r *http.Request) {
 							Order: img.Order,
 						})
 					}
+				}
+			}
+		}
+		if apiAlbum.Cover == nil {
+			tracks, _, err := database.GetTracks(api.readDB, lib.TracksGetParams{
+				AlbumID: utils.Ptr(album.ID),
+			})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			tracksIDs := []int{}
+			for _, track := range tracks {
+				tracksIDs = append(tracksIDs, track.ID)
+			}
+			embeddedImages, err := database.GetImagesFlat(api.readDB, lib.ImagesGetParams{
+				TrackIDs: tracksIDs,
+				Type:     utils.Ptr(lib.ImageTypeMainFront),
+				GroupBy:  lib.ImageGroupByTrack,
+			})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			for _, img := range embeddedImages {
+				if img.Type == lib.ImageTypeMainFront {
+					apiAlbum.Cover = lib.ImageURLs(&img, img.Type)
+					break
 				}
 			}
 		}
@@ -526,6 +606,10 @@ func (api *API) GetAlbum(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	tracksIDs := []int{}
+	for _, track := range tracks {
+		tracksIDs = append(tracksIDs, track.ID)
+	}
 
 	directories, err := database.GetAlbumDirectories(api.readDB, []int{album.ID})
 	if err != nil {
@@ -542,9 +626,9 @@ func (api *API) GetAlbum(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	images := []lib.Image{}
+	directoryImages := []lib.Image{}
 	if dirIDs, ok := directories[album.ID]; ok {
-		images, err = database.GetImagesFlat(api.readDB, lib.ImagesGetParams{
+		directoryImages, err = database.GetImagesFlat(api.readDB, lib.ImagesGetParams{
 			DirectoryIDs: dirIDs,
 		})
 		if err != nil {
@@ -553,13 +637,31 @@ func (api *API) GetAlbum(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	embeddedImages, err := database.GetImagesFlat(api.readDB, lib.ImagesGetParams{
+		TrackIDs: tracksIDs,
+		Type:     utils.Ptr(lib.ImageTypeMainFront),
+		GroupBy:  lib.ImageGroupByTrack,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	apiTracks := make([]lib.APITrack, len(tracks))
 	for i, track := range tracks {
 		apiTrack := track.ToAPI()
-		for _, img := range images {
+		for _, img := range directoryImages {
 			if img.Type == lib.ImageTypeMainFront {
 				apiTrack.Cover = lib.ImageURLs(&img, img.Type)
 				break
+			}
+		}
+		if apiTrack.Cover == nil {
+			for _, img := range embeddedImages {
+				if img.Type == lib.ImageTypeMainFront {
+					apiTrack.Cover = lib.ImageURLs(&img, img.Type)
+					break
+				}
 			}
 		}
 		apiTracks[i] = apiTrack
@@ -579,7 +681,17 @@ func (api *API) GetAlbum(w http.ResponseWriter, r *http.Request) {
 	}
 
 	apiAlbum.Images = []lib.APIImage{}
-	for _, img := range images {
+	for _, img := range directoryImages {
+		if img.Type == lib.ImageTypeMainFront {
+			apiAlbum.Cover = lib.ImageURLs(&img, img.Type)
+		}
+		apiAlbum.Images = append(apiAlbum.Images, lib.APIImage{
+			URL:   lib.ThumbnailURL(&img, lib.DefaultThumbnailSize),
+			Type:  img.Type.String(),
+			Order: img.Order,
+		})
+	}
+	for _, img := range embeddedImages {
 		if img.Type == lib.ImageTypeMainFront {
 			apiAlbum.Cover = lib.ImageURLs(&img, img.Type)
 		}
