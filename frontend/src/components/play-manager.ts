@@ -1,7 +1,7 @@
 import SonaryLitElement from '@/base'
 import { html } from 'lit'
 import { customElement } from 'lit/decorators.js'
-import store, { setProgressIndeterminate, playTrack } from '@/store'
+import { setProgressIndeterminate, playTrack } from '@/store'
 import type { Track } from '@/types'
 
 @customElement('sonary-play-manager')
@@ -19,11 +19,11 @@ export class PlayManager extends SonaryLitElement {
     }
 
     private _sendPlay(trackIds: number[]) {
-        store.dispatch(setProgressIndeterminate(true))
-        store.dispatch(playTrack(trackIds)).then(() => {
-            store.dispatch(setProgressIndeterminate(false))
+        this.store.dispatch(setProgressIndeterminate(true))
+        this.store.dispatch(playTrack(trackIds)).then(() => {
+            this.store.dispatch(setProgressIndeterminate(false))
         }).catch(() => {
-            store.dispatch(setProgressIndeterminate(false))
+            this.store.dispatch(setProgressIndeterminate(false))
         })
     }
 

@@ -104,6 +104,7 @@ type TracksGetParams struct {
 	Page        *int
 	Like        *bool
 	NoAlbum     bool
+	SearchQuery *string
 }
 
 type TrackUpdateParams struct {
@@ -111,21 +112,23 @@ type TrackUpdateParams struct {
 }
 
 type ArtistsGetParams struct {
-	ID     *int
-	IDs    []int
-	Name   *string
-	Random bool
-	Limit  int
-	Page   *int
+	ID          *int
+	IDs         []int
+	Name        *string
+	Random      bool
+	Limit       int
+	Page        *int
+	SearchQuery *string
 }
 
 type AlbumsGetParams struct {
-	ID       *int
-	ArtistID *int
-	Random   bool
-	Title    *string
-	Limit    int
-	Page     *int
+	ID          *int
+	ArtistID    *int
+	Random      bool
+	Title       *string
+	Limit       int
+	Page        *int
+	SearchQuery *string
 }
 
 type ConvertParams struct {

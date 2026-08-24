@@ -2,7 +2,7 @@ import SonaryLitElement from '@/base'
 import { html } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { classMap } from 'lit/directives/class-map.js'
-import store, {
+import {
     updateTrack, setProgressIndeterminate, deleteItem, fetchTracksMode, type updateTrackParams
 } from '@/store'
 import { notify } from '@/utils/notifier'
@@ -23,27 +23,27 @@ export class TrackLikeButton extends SonaryLitElement {
         if (this._isLoading) return
 
         this._isLoading = true
-        store.dispatch(setProgressIndeterminate(true))
+        this.store.dispatch(setProgressIndeterminate(true))
 
         const targetValue = !this.isLiked
 
-        store.dispatch(updateTrack(this.trackId, <updateTrackParams>{
+        this.store.dispatch(updateTrack(this.trackId, <updateTrackParams>{
             like: targetValue
         })).then(() => {
             this._isLoading = false
-            store.dispatch(setProgressIndeterminate(false))
+            this.store.dispatch(setProgressIndeterminate(false))
 
             if (targetValue) {
                 notify('Added to favorites', 'success')
             } else {
                 notify('Removed from favorites', 'success')
                 if (this.listMode === fetchTracksMode.Favorites) {
-                    store.dispatch(deleteItem(this.trackId))
+                    this.store.dispatch(deleteItem(this.trackId))
                 }
             }
         }).catch(() => {
             this._isLoading = false
-            store.dispatch(setProgressIndeterminate(false))
+            this.store.dispatch(setProgressIndeterminate(false))
             notify('Failed to update favorite status', 'danger')
         })
     }

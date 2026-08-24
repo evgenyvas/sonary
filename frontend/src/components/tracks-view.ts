@@ -2,7 +2,7 @@ import SonaryLitElement from '@/base'
 import { html } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { createRef, ref } from 'lit/directives/ref.js'
-import store, {
+import {
     fetchTrack, setProgressIndeterminate, type RootState
 } from '@/store'
 import type { Track } from '@/types'
@@ -41,7 +41,7 @@ export class TracksView extends SonaryLitElement {
             this._isLoading = true
             this.store.dispatch(setProgressIndeterminate(true))
         }
-        store.dispatch(fetchTrack(<number>this.trackId)).then(() => {
+        this.store.dispatch(fetchTrack(<number>this.trackId)).then(() => {
             if (!this.storeState.tracks.currentKey) {
                 this._isLoading = false
                 this.store.dispatch(setProgressIndeterminate(false))

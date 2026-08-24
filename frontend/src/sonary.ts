@@ -1,7 +1,10 @@
 import { html } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
-import { setProgress, type RootState, fetchTracksMode, fetchAlbumsMode, fetchArtistsMode } from '@/store'
-import { Router } from '@lit-labs/router'
+import {
+    setProgress, type RootState, fetchTracksMode, fetchAlbumsMode,
+    fetchArtistsMode, setSearchQuery
+} from '@/store'
+import { Router, type RouteConfig, type PathRouteConfig } from '@lit-labs/router'
 import SonaryLitElement from '@/base'
 import '@/assets/style.scss'
 import { connect as wsConnect, onMessage } from '@/modules/websocket/websocket'
@@ -18,6 +21,7 @@ import '@awesome.me/webawesome/dist/components/progress-bar/progress-bar.js'
 import '@awesome.me/webawesome/dist/components/breadcrumb/breadcrumb.js'
 import '@awesome.me/webawesome/dist/components/breadcrumb-item/breadcrumb-item.js'
 import { EventImportProgressUpdate } from '@/types'
+import '@/components/search-input'
 import '@/components/tracks-list'
 import '@/components/tracks-view'
 import '@/components/artists-list'
@@ -27,7 +31,7 @@ import '@/components/albums-view'
 
 @customElement('sonary-app')
 export class SonaryApp extends SonaryLitElement {
-    private _router: Router = new Router(this, [
+    private _rawRoutes: PathRouteConfig[] = [
         {
             path: import.meta.env.VITE_BASE_APP_ROUTE,
             render: () => html`
@@ -103,7 +107,50 @@ export class SonaryApp extends SonaryLitElement {
         <sonary-tracks-view .id="${id}" .baseRoute="${import.meta.env.VITE_BASE_APP_ROUTE}"></sonary-tracks-view>
       `
         },
-    ])
+        {
+            path: import.meta.env.VITE_BASE_APP_ROUTE + 'search',
+            render: () => {
+                // automatic redirect to the homepage without rebooting
+                window.history.replaceState({}, '', import.meta.env.VITE_BASE_APP_ROUTE)
+                window.dispatchEvent(new PopStateEvent('popstate'))
+                return html`<p>Redirecting to home...</p>`
+            }
+        },
+        {
+            path: import.meta.env.VITE_BASE_APP_ROUTE + 'search/:query',
+            render: ({ query }) => html`
+        <wa-breadcrumb>
+          <span slot="separator">/</span>
+          <wa-breadcrumb-item>Search</wa-breadcrumb-item>
+        </wa-breadcrumb>
+        <b>Artists</b>
+        <sonary-artists-list .baseRoute="${import.meta.env.VITE_BASE_APP_ROUTE}" .mode=${fetchArtistsMode.All} .searchQuery="${query}"></sonary-artists-list>
+        <b>Albums</b>
+        <sonary-albums-list .baseRoute="${import.meta.env.VITE_BASE_APP_ROUTE}" .mode=${fetchAlbumsMode.All} .searchQuery="${query}"></sonary-albums-list>
+        <b>Tracks</b>
+        <sonary-tracks-list .baseRoute="${import.meta.env.VITE_BASE_APP_ROUTE}" .mode=${fetchTracksMode.All} .searchQuery="${query}"></sonary-tracks-list>
+      `
+        },
+    ]
+
+    private _searchPathPattern = 'search/:query'
+
+    private _finalRoutes: RouteConfig[] = this._rawRoutes.map((route) => {
+        if (route.path.endsWith(this._searchPathPattern)) {
+            return route
+        }
+        const originalEnter = route.enter
+        route.enter = async (params) => {
+            this.store.dispatch(setSearchQuery(''))
+            if (originalEnter) {
+                return originalEnter(params)
+            }
+            return true
+        }
+        return route
+    })
+
+    private _router = new Router(this, this._finalRoutes)
 
     @state()
     private _baseRoute: string = '/'
@@ -155,8 +202,8 @@ export class SonaryApp extends SonaryLitElement {
       <div id="main-content" slot="skip-to-content-target"></div>
       <div id="callout-toast-container" popover="manual"></div>
       <header slot="header">
-          <a href="${this._baseRoute}" class="wa-link-plain">
-        <div class="wa-cluster">
+        <a href="${this._baseRoute}" class="wa-link-plain">
+          <div class="wa-cluster">
             <wa-button data-toggle-nav="" appearance="plain" size="s" variant="neutral">
               <wa-icon name="bars" label="Menu" role="img" aria-label="Menu" library="default" rotate="0" style="--rotate-angle: 0deg;"></wa-icon>
             </wa-button>
@@ -164,11 +211,9 @@ export class SonaryApp extends SonaryLitElement {
               <img src="${logoImage}" alt="Sonary" style="width: 100%">
             </div>
             <span class="wa-heading-l">Sonary</span>
-        </div>
-          </a>
-        <wa-input id="search-header" placeholder="Search" class="wa-desktop-only" style="max-inline-size: 100%" type="text" size="m" appearance="outlined">
-          <wa-icon slot="start" name="magnifying-glass" aria-hidden="true" library="default" rotate="0" style="--rotate-angle: 0deg;"></wa-icon>
-        </wa-input>
+          </div>
+        </a>
+        <sonary-search-input inputId="search-header" customClass="wa-desktop-only"></sonary-search-input>
         <div class="wa-cluster">
           <wa-dropdown class="color-scheme-selector" title="Toggle color scheme" size="m" placement="bottom-start" @wa-select="${this._changeColorScheme}">
             <wa-button slot="trigger" id="color-scheme-selector-trigger" appearance="plain" pill="" variant="neutral" size="m" aria-labelledby="color-scheme-tooltip">
@@ -192,9 +237,7 @@ export class SonaryApp extends SonaryLitElement {
         </div>
       </header>
       <div slot="navigation-header" class="wa-split wa-mobile-only">
-        <wa-input id="search-nav-drawer" placeholder="Search" style="max-inline-size: 100%" type="text" size="m" appearance="outlined">
-          <wa-icon slot="start" name="magnifying-glass" aria-hidden="true" library="default" rotate="0" style="--rotate-angle: 0deg;"></wa-icon>
-        </wa-input>
+        <sonary-search-input inputId="search-nav-drawer"></sonary-search-input>
       </div>
       <nav slot="navigation" style="padding-top: 0;">
         <ul class="wa-stack wa-gap-0">

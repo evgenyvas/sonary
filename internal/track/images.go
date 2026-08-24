@@ -158,7 +158,8 @@ func (s *DirectoryScanner) processEmbeddedImages() error {
 
 		for _, embedded := range pictures {
 			if embedded.Ext == "" {
-				return fmt.Errorf("unsupported embedded image format: track_id=%d", track.ID)
+				log.Printf("unsupported embedded image format: track_id=%d", track.ID)
+				continue
 			}
 			img, err := s.buildEmbeddedImage(*track, embedded)
 			if err != nil {

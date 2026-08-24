@@ -4,7 +4,7 @@ import { customElement, property, state } from 'lit/decorators.js'
 import { createRef, ref } from 'lit/directives/ref.js'
 import { repeat } from 'lit/directives/repeat.js'
 import { type Track } from '@/types'
-import store, {
+import {
     fetchTracks, setProgressIndeterminate, getTracksKey, setTrackItem,
     type RootState, type TracksQuery, fetchTracksMode, setCurrentTracksKey
 } from '@/store'
@@ -53,6 +53,9 @@ export class TracksList extends SonaryLitElement {
     @property({ type: String, attribute: 'base-route' })
     baseRoute: string = '/'
 
+    @property({ type: String })
+    searchQuery: string = ''
+
     private convertManagerRef = createRef<any>()
     private playManagerRef = createRef<any>()
 
@@ -61,6 +64,7 @@ export class TracksList extends SonaryLitElement {
             mode: this.mode,
             artistId: this.artistId ?? undefined,
             albumId: this.albumId ?? undefined,
+            searchQuery: this.searchQuery || undefined,
         }
     }
 
@@ -87,11 +91,21 @@ export class TracksList extends SonaryLitElement {
         this._hasNext = state.tracks.hasNext
     }
 
+    willUpdate(changedProperties: Map<string, any>) {
+        if (changedProperties.has('searchQuery')) {
+            const previousValue = changedProperties.get('searchQuery')
+            if (previousValue !== undefined && this.searchQuery !== '') {
+                this._page = null
+                this._loadItems()
+            }
+        }
+    }
+
     _loadItems() {
         this._isLoading = true
         this.store.dispatch(setCurrentTracksKey(this.queryKey))
         this.store.dispatch(setProgressIndeterminate(true))
-        store.dispatch(fetchTracks(this.query, this.limit, this._page)).then(() => {
+        this.store.dispatch(fetchTracks(this.query, this.limit, this._page)).then(() => {
             this._isLoading = false
             this.store.dispatch(setProgressIndeterminate(false))
         })

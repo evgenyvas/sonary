@@ -200,51 +200,13 @@ func DeleteDirectories(db *sql.DB, dirs map[string]lib.DirDB) error {
 			placeholders = append(placeholders, "?")
 		}
 
-		// delete tracks
-		query := fmt.Sprintf(
-			"DELETE FROM tracks WHERE directory_id IN (%s)",
-			strings.Join(placeholders, ","),
-		)
-
-		_, err = tx.Exec(query, ids...)
-		if err != nil {
-			tx.Rollback()
-			return err
-		}
-
-		// delete albums
-		_, err = tx.Exec(`DELETE FROM albums
-			WHERE NOT EXISTS (
-			SELECT 1
-			FROM tracks
-			WHERE tracks.album_id = albums.id
-		)`)
-		if err != nil {
-			tx.Rollback()
-			return err
-		}
-
-		// delete artists
-		_, err = tx.Exec(`DELETE FROM artists
-			WHERE NOT EXISTS (
-			SELECT 1
-			FROM albums
-			WHERE albums.artist_id = artists.id
-		) AND NOT EXISTS (
-			SELECT 1
-			FROM tracks
-			WHERE tracks.artist_id = artists.id
-		)`)
-		if err != nil {
-			tx.Rollback()
-			return err
-		}
+		in := strings.Join(placeholders, ",")
 
 		// delete directories
-		query = fmt.Sprintf(
-			"DELETE FROM directories WHERE id IN (%s)",
-			strings.Join(placeholders, ","),
-		)
+		query := fmt.Sprintf(`
+			DELETE FROM directories
+			WHERE id IN (%s)
+		`, in)
 
 		res, err := tx.Exec(query, ids...)
 		if err != nil {
@@ -265,6 +227,44 @@ func DeleteDirectories(db *sql.DB, dirs map[string]lib.DirDB) error {
 				affected,
 				len(chunk),
 			)
+		}
+
+		// delete albums
+		_, err = tx.Exec(`
+			DELETE FROM albums
+			WHERE NOT EXISTS (
+				SELECT 1
+				FROM tracks
+				WHERE tracks.album_id = albums.id
+			)
+		`)
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+
+		// delete artists
+		_, err = tx.Exec(`
+			DELETE FROM artists
+			WHERE NOT EXISTS (
+				SELECT 1
+				FROM albums
+				WHERE albums.artist_id = artists.id
+			)
+			AND NOT EXISTS (
+				SELECT 1
+				FROM tracks
+				WHERE tracks.artist_id = artists.id
+			)
+			AND NOT EXISTS (
+				SELECT 1
+				FROM images
+				WHERE images.artist_id = artists.id
+			)
+		`)
+		if err != nil {
+			tx.Rollback()
+			return err
 		}
 
 		if err := tx.Commit(); err != nil {
@@ -810,6 +810,13 @@ func GetTracks(db *sql.DB, params lib.TracksGetParams) ([]lib.TrackDB, bool, err
 		if params.NoAlbum {
 			conditions = append(conditions, "al.artist_id != t.artist_id")
 		}
+		if params.SearchQuery != nil {
+			cleanQuery := strings.ToLower(strings.TrimSpace(*params.SearchQuery))
+			likeArg := "%" + cleanQuery + "%"
+			conditions = append(conditions, "(LOWER(t.title) LIKE ? OR LOWER(ar.name) "+
+				"LIKE ? OR LOWER(al.title) LIKE ? OR LOWER(t.genre) LIKE ?)")
+			args = append(args, likeArg, likeArg, likeArg, likeArg)
+		}
 	}
 
 	if len(conditions) > 0 {
@@ -951,6 +958,12 @@ func GetArtists(db DBTX, params lib.ArtistsGetParams) ([]lib.ArtistDB, bool, err
 			conditions = append(conditions, "name = ?")
 			args = append(args, *params.Name)
 		}
+		if params.SearchQuery != nil {
+			cleanQuery := strings.ToLower(strings.TrimSpace(*params.SearchQuery))
+			likeArg := "%" + cleanQuery + "%"
+			conditions = append(conditions, "LOWER(name) LIKE ?")
+			args = append(args, likeArg)
+		}
 	}
 
 	if len(conditions) > 0 {
@@ -1045,6 +1058,12 @@ func GetAlbums(db DBTX, params lib.AlbumsGetParams) ([]lib.AlbumDB, bool, error)
 		if params.Title != nil {
 			conditions = append(conditions, "al.title = ?")
 			args = append(args, *params.Title)
+		}
+		if params.SearchQuery != nil {
+			cleanQuery := strings.ToLower(strings.TrimSpace(*params.SearchQuery))
+			likeArg := "%" + cleanQuery + "%"
+			conditions = append(conditions, "(LOWER(al.title) LIKE ? OR LOWER(ar.name) LIKE ?)")
+			args = append(args, likeArg, likeArg)
 		}
 	}
 

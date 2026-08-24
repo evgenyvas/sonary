@@ -74,6 +74,15 @@ func (api *API) GetTracks(w http.ResponseWriter, r *http.Request) {
 		params.ArtistID = utils.Ptr(artistID)
 	}
 
+	searchQuery, err := url.PathUnescape(utils.QueryString(q, "searchQuery"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if searchQuery != "" {
+		params.SearchQuery = utils.Ptr(searchQuery)
+	}
+
 	tracks, hasNext, err := database.GetTracks(api.readDB, params)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -307,6 +316,15 @@ func (api *API) GetArtists(w http.ResponseWriter, r *http.Request) {
 		params.Random = true
 	}
 
+	searchQuery, err := url.PathUnescape(utils.QueryString(q, "searchQuery"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if searchQuery != "" {
+		params.SearchQuery = utils.Ptr(searchQuery)
+	}
+
 	artists, hasNext, err := database.GetArtists(api.readDB, params)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -462,6 +480,15 @@ func (api *API) GetAlbums(w http.ResponseWriter, r *http.Request) {
 	artistID, _ := utils.QueryInt(q, "artistId")
 	if artistID > 0 {
 		params.ArtistID = utils.Ptr(artistID)
+	}
+
+	searchQuery, err := url.PathUnescape(utils.QueryString(q, "searchQuery"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if searchQuery != "" {
+		params.SearchQuery = utils.Ptr(searchQuery)
 	}
 
 	albums, hasNext, err := database.GetAlbums(api.readDB, params)

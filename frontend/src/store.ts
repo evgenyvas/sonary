@@ -7,6 +7,7 @@ export interface TracksQuery {
     mode: fetchTracksMode
     artistId?: number
     albumId?: number
+    searchQuery?: string
 }
 
 export function getTracksKey(query: TracksQuery): string {
@@ -14,12 +15,14 @@ export function getTracksKey(query: TracksQuery): string {
         query.mode,
         query.artistId ?? '-',
         query.albumId ?? '-',
+        query.searchQuery ?? '-',
     ].join(':')
 }
 
 const initialState = {
     progress: <number>0,
     progressIndeterminate: <boolean>false,
+    searchQuery: <string>'',
 }
 
 const initialStateTrack = {
@@ -32,12 +35,14 @@ const initialStateTrack = {
 export interface ArtistsQuery {
     mode: fetchArtistsMode
     relatedArtistId?: number
+    searchQuery?: string
 }
 
 export function getArtistsKey(query: ArtistsQuery): string {
     return [
         query.mode,
         query.relatedArtistId ?? '-',
+        query.searchQuery ?? '-',
     ].join(':')
 }
 
@@ -46,17 +51,20 @@ const initialStateArtist = {
     items: <Artist[]>[],
     hasNext: <boolean>false,
     selectedItem: <Artist | null>null,
+    searchQuery: <string>'',
 }
 
 export interface AlbumsQuery {
     mode: fetchAlbumsMode
     artistId?: number
+    searchQuery?: string
 }
 
 export function getAlbumsKey(query: AlbumsQuery): string {
     return [
         query.mode,
         query.artistId ?? '',
+        query.searchQuery ?? '-',
     ].join(':')
 }
 
@@ -65,6 +73,7 @@ const initialStateAlbum = {
     items: <Album[]>[],
     hasNext: <boolean>false,
     selectedItem: <Album | null>null,
+    searchQuery: <string>'',
 }
 
 const SET_CURRENT_TRACKS_KEY: string = 'SET_CURRENT_TRACKS_KEY'
@@ -75,6 +84,7 @@ const SET_TRACK_HAS_NEXT: string = 'SET_TRACK_HAS_NEXT'
 const UPDATE_ITEM: string = 'UPDATE_ITEM'
 const SET_PROGRESS: string = 'SET_PROGRESS'
 const SET_PROGRESS_INDETERMINATE: string = 'SET_PROGRESS_INDETERMINATE'
+const SET_SEARCH_QUERY: string = 'SET_SEARCH_QUERY'
 const DELETE_ITEM: string = 'DELETE_ITEM'
 
 const SET_CURRENT_ARTISTS_KEY: string = 'SET_CURRENT_ARTISTS_KEY'
@@ -141,6 +151,13 @@ export const setProgress = (payload: number) => {
 export const setProgressIndeterminate = (payload: boolean) => {
     return {
         type: SET_PROGRESS_INDETERMINATE,
+        payload
+    }
+}
+
+export const setSearchQuery = (payload: string) => {
+    return {
+        type: SET_SEARCH_QUERY,
         payload
     }
 }
@@ -229,6 +246,9 @@ const appSlice = (state = initialState, action: any) => {
             break
         case SET_PROGRESS_INDETERMINATE:
             state.progressIndeterminate = action.payload
+            break
+        case SET_SEARCH_QUERY:
+            state.searchQuery = action.payload
             break
     }
     return state
@@ -323,13 +343,16 @@ export const fetchTracks = (query: TracksQuery,
     limit: number = 50, page: number | null = null): any => {
     return async (dispatch: AppDispatch) => {
         let params: {
-            mode: fetchTracksMode, limit: number, page?: number, artistId?: number
+            mode: fetchTracksMode, limit: number, page?: number, artistId?: number, searchQuery?: string
         } = { mode: query.mode, limit }
         if (page) {
             params.page = page
         }
         if (query.artistId) {
             params.artistId = query.artistId
+        }
+        if (query.searchQuery) {
+            params.searchQuery = query.searchQuery
         }
         return httpClient('/v1/tracks', { params: flatten(params) })
             .then(response => {
@@ -387,10 +410,13 @@ export const fetchArtists = (query: ArtistsQuery,
     limit: number = 50, page: number | null = null): any => {
     return async (dispatch: AppDispatch) => {
         let params: {
-            mode: fetchArtistsMode, limit: number, page?: number
+            mode: fetchArtistsMode, limit: number, page?: number, searchQuery?: string
         } = { mode: query.mode, limit }
         if (page) {
             params.page = page
+        }
+        if (query.searchQuery) {
+            params.searchQuery = query.searchQuery
         }
         return httpClient('/v1/artists', { params: params })
             .then(response => {
@@ -430,13 +456,16 @@ export const fetchAlbums = (query: AlbumsQuery,
     limit: number = 50, page: number | null = null): any => {
     return async (dispatch: AppDispatch) => {
         let params: {
-            mode: fetchAlbumsMode, limit: number, page?: number, artistId?: number
+            mode: fetchAlbumsMode, limit: number, page?: number, artistId?: number, searchQuery?: string
         } = { mode: query.mode, limit }
         if (page) {
             params.page = page
         }
         if (query.artistId) {
             params.artistId = query.artistId
+        }
+        if (query.searchQuery) {
+            params.searchQuery = query.searchQuery
         }
         return httpClient('/v1/albums', { params: flatten(params) })
             .then(response => {

@@ -3,7 +3,7 @@ import { html, nothing } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { ref, createRef, type Ref } from 'lit/directives/ref.js'
 import { repeat } from 'lit/directives/repeat.js'
-import store, { type RootState, fetchArtist, setProgressIndeterminate, fetchTracksMode } from '@/store'
+import { type RootState, fetchArtist, setProgressIndeterminate, fetchTracksMode } from '@/store'
 import type { Artist, Image } from '@/types'
 import { classMap } from 'lit/directives/class-map.js'
 import '@awesome.me/webawesome/dist/components/carousel/carousel.js'
@@ -37,7 +37,7 @@ export class ArtistsView extends SonaryLitElement {
     _loadItems() {
         this._isLoading = true
         this.store.dispatch(setProgressIndeterminate(true))
-        store.dispatch(fetchArtist(<number>this.artistId)).then(() => {
+        this.store.dispatch(fetchArtist(<number>this.artistId)).then(() => {
             this._isLoading = false
             this.store.dispatch(setProgressIndeterminate(false))
             this._selectedItem = this.storeState.artists.selectedItem

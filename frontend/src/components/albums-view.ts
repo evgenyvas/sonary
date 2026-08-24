@@ -3,7 +3,7 @@ import { html, nothing } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { ref, createRef } from 'lit/directives/ref.js'
 import { repeat } from 'lit/directives/repeat.js'
-import store, { fetchAlbum, setProgressIndeterminate } from '@/store'
+import { fetchAlbum, setProgressIndeterminate } from '@/store'
 import type { Track, Album, Image } from '@/types'
 import { formatDynamicTime } from '@/utils/func'
 import '@awesome.me/webawesome/dist/components/carousel/carousel.js'
@@ -44,7 +44,7 @@ export class AlbumsView extends SonaryLitElement {
 
         this._isLoading = true
         this.store.dispatch(setProgressIndeterminate(true))
-        store.dispatch(fetchAlbum(<number>this.albumId)).then(() => {
+        this.store.dispatch(fetchAlbum(<number>this.albumId)).then(() => {
             this._isLoading = false
             this.store.dispatch(setProgressIndeterminate(false))
             this._selectedItem = this.storeState.albums.selectedItem

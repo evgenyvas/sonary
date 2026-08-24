@@ -3,7 +3,7 @@ import { html, nothing } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { repeat } from 'lit/directives/repeat.js'
 import type { Artist } from '@/types'
-import store, {
+import {
     fetchArtists, setProgressIndeterminate, getArtistsKey, setCurrentArtistsKey,
     fetchArtistsMode, type RootState, type ArtistsQuery
 } from '@/store'
@@ -36,10 +36,14 @@ export class ArtistsList extends SonaryLitElement {
     @property({ type: String, attribute: 'base-route' })
     baseRoute: string = '/'
 
+    @property({ type: String })
+    searchQuery: string = ''
+
     private get query(): ArtistsQuery {
         return {
             mode: this.mode,
             relatedArtistId: this.relatedArtistId ?? undefined,
+            searchQuery: this.searchQuery || undefined,
         }
     }
 
@@ -61,11 +65,21 @@ export class ArtistsList extends SonaryLitElement {
         this._hasNext = state.artists.hasNext
     }
 
+    willUpdate(changedProperties: Map<string, any>) {
+        if (changedProperties.has('searchQuery')) {
+            const previousValue = changedProperties.get('searchQuery')
+            if (previousValue !== undefined && this.searchQuery !== '') {
+                this._page = null
+                this._loadItems()
+            }
+        }
+    }
+
     _loadItems() {
         this._isLoading = true
         this.store.dispatch(setCurrentArtistsKey(this.queryKey))
         this.store.dispatch(setProgressIndeterminate(true))
-        store.dispatch(fetchArtists(this.query, this.limit, this._page)).then(() => {
+        this.store.dispatch(fetchArtists(this.query, this.limit, this._page)).then(() => {
             this._isLoading = false
             this.store.dispatch(setProgressIndeterminate(false))
         })

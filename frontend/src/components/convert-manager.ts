@@ -6,7 +6,7 @@ import { repeat } from 'lit/directives/repeat.js'
 import { classMap } from 'lit/directives/class-map.js'
 import { onMessage } from '@/modules/websocket/websocket'
 import { notify } from '@/utils/notifier'
-import store, { setProgressIndeterminate, convertTrack, downloadConvert } from '@/store'
+import { setProgressIndeterminate, convertTrack, downloadConvert } from '@/store'
 import {
     type Track, type TrackConvert, type ConvertTrackParams,
     EventConvertProgressUpdate, EventConvertTrackProgressUpdate,
@@ -46,7 +46,7 @@ export class ConvertManager extends SonaryLitElement {
                 this._convertProgress = eventMsg.progress
                 if (eventMsg.total === eventMsg.processed) {
                     notify('Convert finished successfully', 'success')
-                    store.dispatch(downloadConvert(this._convertJobId))
+                    this.store.dispatch(downloadConvert(this._convertJobId))
                 }
             } else if (eventMsg.type === EventConvertTrackProgressUpdate) {
                 if ([ConvertStatusProcessing, ConvertStatusCompleted].includes(eventMsg.status)) {
@@ -95,10 +95,10 @@ export class ConvertManager extends SonaryLitElement {
         this._convertProgress = 0
         this._convertJobId = 0
 
-        store.dispatch(setProgressIndeterminate(true))
+        this.store.dispatch(setProgressIndeterminate(true))
 
         const trackIds = tracks.map(t => t.id)
-        store.dispatch(convertTrack(trackIds, <ConvertTrackParams>{
+        this.store.dispatch(convertTrack(trackIds, <ConvertTrackParams>{
             format: 'mp3',
             mode: 'cbr',
             quality: '320',
@@ -109,7 +109,7 @@ export class ConvertManager extends SonaryLitElement {
                 if (dialog) dialog.open = true
                 this._convertJobId = response.job_id
             }
-            store.dispatch(setProgressIndeterminate(false))
+            this.store.dispatch(setProgressIndeterminate(false))
         })
     }
 
