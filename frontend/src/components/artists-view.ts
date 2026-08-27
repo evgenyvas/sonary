@@ -98,7 +98,7 @@ export class ArtistsView extends SonaryLitElement {
   </div>
   <div class="${classMap({ 'wa-visually-hidden': !this.hasRelated })}">
     <b>See also</b>
-    <sonary-artists-list .baseRoute="${import.meta.env.VITE_BASE_APP_ROUTE}" .relatedArtistId=${this._selectedItem?.id}></sonary-artists-list>
+    <sonary-artists-list .baseRoute="${this.baseRoute}" .relatedArtistId=${this._selectedItem?.id}></sonary-artists-list>
   </div>
 
   <wa-dialog

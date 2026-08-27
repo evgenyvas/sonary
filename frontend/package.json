@@ -1,31 +1,31 @@
 {
   "name": "sonary-frontend",
   "private": true,
-  "version": "0.0.1",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
+    "dev": "vite --mode development",
+    "build": "tsc && vite build --mode production",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@awesome.me/webawesome": "^3.8.0",
-    "@floating-ui/utils": "^0.2.11",
+    "@awesome.me/webawesome": "^3.12.0",
+    "@floating-ui/utils": "^0.2.12",
     "@lit-labs/router": "^0.1.4",
     "@lit/react": "^1.0.8",
-    "dayjs": "^1.11.21",
-    "lit": "^3.3.2",
+    "dayjs": "^1.11.23",
+    "lit": "^3.3.3",
     "ofetch": "^1.5.1",
     "redux": "^5.0.1",
     "redux-thunk": "^3.1.0",
     "urlpattern-polyfill": "^10.1.0"
   },
   "devDependencies": {
-    "@types/node": "^25.9.2",
-    "@types/react": "^19.2.17",
-    "sass": "^1.100.0",
-    "terser": "^5.48.0",
-    "typescript": "~6.0.2",
-    "vite": "^8.0.12"
+    "@types/node": "^25.9.5",
+    "@types/react": "^19.2.18",
+    "sass": "^1.103.1",
+    "terser": "^5.50.0",
+    "typescript": "~6.0.3",
+    "vite": "^8.2.2"
   }
 }

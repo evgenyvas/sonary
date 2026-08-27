@@ -1,0 +1,2 @@
+FROM docker.io/nginx:1.29.3-alpine3.22
+COPY ./vhost.conf /etc/nginx/conf.d/vhost.conf

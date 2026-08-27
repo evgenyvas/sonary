@@ -11,17 +11,23 @@ import (
 	"github.com/joho/godotenv"
 )
 
+type PathMapping struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
 type Config struct {
-	Host         string   `env:"HOST"`
-	AppEnv       string   `env:"APP_ENV"`
-	RootPaths    []string `env:"ROOT_PATHS"`
-	DatabaseDsn  string   `env:"DATABASE_DSN"`
-	WorkerCount  int      `env:"WORKER_COUNT"`
-	FoobarPath   string   `env:"FOOBAR_PATH"`
-	IsWsl        bool     `env:"WSL"`
-	FoobarAPI    bool     `env:"FOOBAR_API"`
-	FoobarAPIUrl string   `env:"FOOBAR_API_URL"`
-	CacheDir     string   `env:"CACHE_DIR"`
+	Host          string        `env:"HOST"`
+	AppEnv        string        `env:"APP_ENV"`
+	ServeFrontend bool          `env:"SERVE_FRONTEND"`
+	RootPaths     []string      `env:"ROOT_PATHS"`
+	PathMap       []PathMapping `env:"PATH_MAP"`
+	DatabaseDsn   string        `env:"DATABASE_DSN"`
+	WorkerCount   int           `env:"WORKER_COUNT"`
+	FoobarPath    string        `env:"FOOBAR_PATH"`
+	FoobarAPI     bool          `env:"FOOBAR_API"`
+	FoobarAPIUrl  string        `env:"FOOBAR_API_URL"`
+	CacheDir      string        `env:"CACHE_DIR"`
 }
 
 var instance *Config
@@ -45,6 +51,11 @@ func init() {
 				var s []string
 				err := json.Unmarshal([]byte(v), &s)
 				return s, err
+			},
+			reflect.TypeFor[[]PathMapping](): func(v string) (any, error) {
+				var mappings []PathMapping
+				err := json.Unmarshal([]byte(v), &mappings)
+				return mappings, err
 			},
 		},
 	}

@@ -1,0 +1,31 @@
+services:
+    sonary-app:
+        build:
+            context: .
+            dockerfile: Containerfile
+        container_name: sonary-app
+        restart: unless-stopped
+        ports:
+            - "3101:3101"
+        volumes:
+            # mount the database with write permissions
+            - ~/dev/data/sqlite:/data/sqlite:rw,U
+            
+            # mount the local cache with write access
+            - ./var:/app/var:rw,U
+            
+            # mount music directories
+            - /mnt/d/Music/_audio:/data/music_d:ro
+            - /mnt/c/Music/_audio:/data/music_c:ro
+        environment:
+            # resetting phantom proxy hosts for stable network operation
+            - ALL_PROXY=
+            - all_proxy=
+            - HTTP_PROXY=
+            - HTTPS_PROXY=
+            - http_proxy=
+            - https_proxy=
+        logging:
+            options:
+                max-size: "100k"
+                max-file: "3"

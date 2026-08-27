@@ -7,6 +7,19 @@ type StatusHandler = (status: "open" | "close" | "error") => void
 const messageHandlers: MessageHandler[] = []
 const statusHandlers: StatusHandler[] = []
 
+// cryptography stub for insecure HTTP hosts
+if (typeof window !== 'undefined' && window.crypto && !window.crypto.randomUUID) {
+    // @ts-ignore
+    window.crypto.randomUUID = function() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            const r = (Math.random() * 16) | 0;
+            const v = c === 'x' ? r : (r & 0x3) | 0x8;
+            return v.toString(16);
+        })
+    }
+    console.log('HTTP UUID Polyfill injected successfully')
+}
+
 export function connect(connectionId?: string, baseUrl = `${import.meta.env.VITE_WEBSOCKET_URL}`): void {
     currentUserId = connectionId || crypto.randomUUID()
 

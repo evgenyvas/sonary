@@ -1,0 +1,129 @@
+services:
+    proxy-http:
+        build:
+            context: ./proxy/nginx
+            dockerfile: Containerfile
+        restart: unless-stopped
+        ports:
+            - 0.0.0.0:80:80
+            - 0.0.0.0:3104:3104
+        networks:
+            adminer:
+            testapp:
+                ipv4_address: 172.18.0.3
+        depends_on:
+            - proxy-dns
+            - adminer
+            - sonary-backend
+            - sonary-frontend
+        logging:
+            options:
+                max-size: "100k"
+                max-file: "3"
+
+    proxy-dns:
+        build:
+            context: ./proxy/dnsmasq
+            dockerfile: Containerfile
+        restart: unless-stopped
+        expose:
+            - "53"
+        networks:
+            testapp:
+                ipv4_address: 172.18.0.2
+        logging:
+            options:
+                max-size: "100k"
+                max-file: "3"
+
+    adminer:
+        image: docker.io/adminer:5.4.1
+        user: "root"
+        environment:
+            ADMINER_DEFAULT_SERVER: mariadb
+            ADMINER_DESIGN: pappu687
+        restart: unless-stopped
+        networks:
+            - adminer
+        volumes:
+            - ./adminer/login-password-less.php:/var/www/html/plugins-enabled/login-password-less.php:ro
+            - ${SQLITE_DATA_DIR}:/var/www/html/data:rw,U
+        logging:
+            options:
+                max-size: "100k"
+                max-file: "3"
+
+    sonary-backend:
+        build:
+            context: ./sonary/backend
+            dockerfile: Containerfile
+        restart: unless-stopped
+        ports:
+            - 0.0.0.0:8080:8080
+        working_dir: /app
+        volumes:
+            - ${SONARY_DIR}:/app:rw,U
+            - ${SQLITE_DATA_DIR}:/data/sqlite:rw,U
+            - /mnt/d/Music/_audio/:/data/music_d:ro
+            - /mnt/c/Music/_audio/:/data/music_c:ro
+            # not downloading packages after every launch
+            - sonary_go_cache:/go/pkg/mod
+        networks:
+            testapp:
+                ipv4_address: 172.18.0.20
+        environment:
+            # Force drop ALL proxy footprints for runtime execution
+            - ALL_PROXY=
+            - all_proxy=
+            - HTTP_PROXY=
+            - HTTPS_PROXY=
+            - http_proxy=
+            - https_proxy=
+            - GOPROXY=https://proxy.golang.org,direct
+        logging:
+            options:
+                max-size: "100k"
+                max-file: "3"
+
+    sonary-frontend:
+        build:
+            context: ./sonary/frontend
+            dockerfile: Containerfile
+        restart: unless-stopped
+        working_dir: /app/frontend
+        volumes:
+            - ${SONARY_DIR}/frontend:/app/frontend:rw,U
+            # not downloading packages after every launch
+            - sonary_node_modules:/app/frontend/node_modules
+        networks:
+            testapp:
+                ipv4_address: 172.18.0.21
+        environment:
+            - NODE_ENV=dev
+            - ALL_PROXY=
+            - all_proxy=
+            - HTTP_PROXY=
+            - HTTPS_PROXY=
+            - http_proxy=
+            - https_proxy=
+        logging:
+            options:
+                max-size: "100k"
+                max-file: "3"
+        depends_on:
+            - sonary-backend
+
+volumes:
+    sonary_go_cache:
+    sonary_node_modules:
+networks:
+    adminer:
+        external: false
+    testapp:
+        driver: bridge
+        dns:
+            - 172.18.0.2
+        ipam:
+            config:
+                -   subnet: 172.18.0.0/16
+                    gateway: 172.18.0.1

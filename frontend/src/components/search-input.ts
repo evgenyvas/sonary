@@ -16,6 +16,9 @@ export class SonarySearchInput extends SonaryLitElement {
     @property({ type: String })
     customClass: string = ''
 
+    @property({ type: String, attribute: 'base-route' })
+    baseRoute: string = '/'
+
     stateChanged(state: RootState): void {
         super.stateChanged(state)
         if (this._currentSearchQuery !== state.app.searchQuery) {
@@ -29,10 +32,10 @@ export class SonarySearchInput extends SonaryLitElement {
             const waInput = event.target as any
             const value = (waInput?.value || '').trim()
             if (value === '') {
-                window.history.pushState({}, '', import.meta.env.VITE_BASE_APP_ROUTE)
+                window.history.pushState({}, '', this.baseRoute)
             } else {
                 const query = encodeURIComponent(value)
-                window.history.pushState({}, '', `${import.meta.env.VITE_BASE_APP_ROUTE}search/${query}`)
+                window.history.pushState({}, '', `${this.baseRoute}search/${query}`)
             }
             window.dispatchEvent(new PopStateEvent('popstate'))
             this.store.dispatch(setSearchQuery(value))

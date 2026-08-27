@@ -98,7 +98,7 @@ export class AlbumsView extends SonaryLitElement {
   <div class="wa-flank wa-gap-3xl" style="--content-percentage: 40%">
     <div class="wa-split:column wa-align-items-start">
       <div class="wa-stack" style="margin-block: auto">
-        <sonary-tracks-list .baseRoute="${import.meta.env.VITE_BASE_APP_ROUTE}" .albumId=${this._selectedItem?.id}></sonary-tracks-list>
+        <sonary-tracks-list .baseRoute="${this.baseRoute}" .albumId=${this._selectedItem?.id}></sonary-tracks-list>
       </div>
     </div>
   </div>

@@ -213,7 +213,7 @@ export class SonaryApp extends SonaryLitElement {
             <span class="wa-heading-l">Sonary</span>
           </div>
         </a>
-        <sonary-search-input inputId="search-header" customClass="wa-desktop-only"></sonary-search-input>
+        <sonary-search-input inputId="search-header" customClass="wa-desktop-only" .baseRoute="${this._baseRoute}"></sonary-search-input>
         <div class="wa-cluster">
           <wa-dropdown class="color-scheme-selector" title="Toggle color scheme" size="m" placement="bottom-start" @wa-select="${this._changeColorScheme}">
             <wa-button slot="trigger" id="color-scheme-selector-trigger" appearance="plain" pill="" variant="neutral" size="m" aria-labelledby="color-scheme-tooltip">
@@ -237,7 +237,7 @@ export class SonaryApp extends SonaryLitElement {
         </div>
       </header>
       <div slot="navigation-header" class="wa-split wa-mobile-only">
-        <sonary-search-input inputId="search-nav-drawer"></sonary-search-input>
+        <sonary-search-input inputId="search-nav-drawer" .baseRoute="${this._baseRoute}"></sonary-search-input>
       </div>
       <nav slot="navigation" style="padding-top: 0;">
         <ul class="wa-stack wa-gap-0">

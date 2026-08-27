@@ -2,11 +2,11 @@ import { defineConfig, loadEnv } from 'vite'
 import { resolve } from 'path'
 
 const libs = [
-    resolve(__dirname, 'src/modules/polyfill/url-pattern-polyfill.ts'),
+    resolve(import.meta.dirname, 'src/modules/polyfill/url-pattern-polyfill.ts'),
 ]
 
 const config = {
-    entry: [resolve(__dirname, 'src/sonary.ts'), ...libs],
+    entry: [resolve(import.meta.dirname, 'src/sonary.ts'), ...libs],
 }
 
 export default ({ mode }: { mode: string }) => {
@@ -20,7 +20,7 @@ export default ({ mode }: { mode: string }) => {
         },
         resolve: {
             alias: {
-                '@': resolve(__dirname, 'src'),
+                '@': resolve(import.meta.dirname, 'src'),
             }
         },
         optimizeDeps: {
@@ -29,6 +29,7 @@ export default ({ mode }: { mode: string }) => {
         server: {
             port: Number(VITE_PORT),
             host: VITE_HOST,
+            allowedHosts: true,
             open: false,
             cors: true,
             proxy: {
@@ -39,7 +40,8 @@ export default ({ mode }: { mode: string }) => {
             },
             hmr: {
                 host: VITE_HOST,
-                port: 3102,
+                port: Number(VITE_PORT),
+                clientPort: 3104
             },
             watch: {
                 ignored: ["**/public/assets/**"],

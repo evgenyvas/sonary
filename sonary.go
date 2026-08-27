@@ -996,16 +996,20 @@ func main() {
 	mux.HandleFunc("POST /api/v1/convert/download/{jobId}", api.ConvertDownload)
 	mux.HandleFunc("POST /api/v1/play", api.PlayInFoobar)
 
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		tmpl := template.Must(template.ParseFiles("internal/templates/index.html"))
-		if err := tmpl.Execute(w, nil); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
-	})
-
-	// serve files from the "./static" directory at the "/static/" URL path
-	fileServer := http.FileServer(http.Dir("./static"))
-	mux.Handle("/static/", http.StripPrefix("/static", fileServer))
+	if cfg.ServeFrontend {
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			tmpl := template.Must(template.ParseFiles("templates/index.html"))
+			if err := tmpl.Execute(w, nil); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+			}
+		})
+		// serve files from the "./static" directory at the "/static/" URL path
+		fileServer := http.FileServer(http.Dir("./static"))
+		mux.Handle("/static/", http.StripPrefix("/static", fileServer))
+		log.Println("Web frontend enabled")
+	} else {
+		log.Println("Running in API-only mode")
+	}
 
 	// serve generated image thumbnails
 	imageServer := http.FileServer(http.Dir(cfg.CacheDir))
@@ -1056,7 +1060,7 @@ func main() {
 	}()
 
 	// Start the Web Server (This blocks the main thread)
-	log.Println("Starting web server")
+	log.Printf("Starting web server on %v", cfg.Host)
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("HTTP server failed to start: %v", err)
 	}

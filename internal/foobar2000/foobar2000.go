@@ -10,8 +10,8 @@ import (
 	"sonary/internal/config"
 	"sonary/internal/database"
 	"sonary/internal/lib"
-	"sonary/utils"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -85,18 +85,24 @@ func (p *Player) buildPlayItems(trackIDs []int) ([]PlayItem, error) {
 }
 
 func (p *Player) trackToPath(track *lib.TrackDB) string {
-	var path string
-
+	path := track.Path
 	if track.IsCue {
 		path = track.CueFile
-	} else {
-		path = track.Path
 	}
-
-	if p.cfg.IsWsl {
-		path = utils.WSLToWindowsPath(path)
+	for _, mapping := range p.cfg.PathMap {
+		from := strings.TrimRight(mapping.From, "/\\")
+		to := strings.TrimRight(mapping.To, "/\\")
+		if path == from {
+			return to
+		}
+		prefix := from + "/"
+		if !strings.HasPrefix(path, prefix) {
+			continue
+		}
+		relative := strings.TrimPrefix(path, prefix)
+		relative = strings.ReplaceAll(relative, "/", "\\")
+		return to + `\` + relative
 	}
-
 	return path
 }
 
