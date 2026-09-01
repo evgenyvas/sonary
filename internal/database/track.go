@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"log"
 	"slices"
-	"sonary/internal/lib"
+	appContext "sonary/internal/context"
 	"sonary/utils"
 	"strings"
 	"time"
@@ -15,7 +15,7 @@ import (
 
 const batchSize = 500
 
-func GetDirectories(db DBTX) (map[string]lib.DirDB, error) {
+func GetDirectories(db DBTX) (map[string]Directory, error) {
 	query := `
 		SELECT id, path, mtime, last_scan, side_exists, side_mtime
 		FROM directories
@@ -27,10 +27,10 @@ func GetDirectories(db DBTX) (map[string]lib.DirDB, error) {
 	}
 	defer rows.Close()
 
-	var dirs = map[string]lib.DirDB{}
+	var dirs = map[string]Directory{}
 
 	for rows.Next() {
-		var d lib.DirDB
+		var d Directory
 		err := rows.Scan(&d.ID, &d.Path, &d.Mtime, &d.LastScan,
 			&d.SideExists, &d.SideMtime)
 		if err != nil {
@@ -42,13 +42,13 @@ func GetDirectories(db DBTX) (map[string]lib.DirDB, error) {
 	return dirs, nil
 }
 
-func GetDirectory(db DBTX, path string) (*lib.DirDB, error) {
+func GetDirectory(db DBTX, path string) (*Directory, error) {
 	query := `
 		SELECT id, mtime, last_scan, side_exists, side_mtime
 		FROM directories WHERE path = ?
 	`
 
-	dir := &lib.DirDB{Path: path}
+	dir := &Directory{Path: path}
 
 	err := db.QueryRow(query, path).Scan(&dir.ID, &dir.Mtime, &dir.LastScan,
 		&dir.SideExists, &dir.SideMtime)
@@ -62,7 +62,7 @@ func GetDirectory(db DBTX, path string) (*lib.DirDB, error) {
 	return dir, nil
 }
 
-func SaveDirectories(db *sql.DB, dirs map[string]lib.DirScan) error {
+func SaveDirectories(db *sql.DB, dirs map[string]DirScan) error {
 	for _, chunk := range utils.ChunkMap(dirs, batchSize) {
 		tx, err := db.BeginTx(context.Background(), nil)
 		if err != nil {
@@ -102,7 +102,7 @@ func SaveDirectories(db *sql.DB, dirs map[string]lib.DirScan) error {
 	return nil
 }
 
-func UpdateDirectories(db *sql.DB, dirs map[string]lib.DirDB) error {
+func UpdateDirectories(db *sql.DB, dirs map[string]Directory) error {
 	for _, chunk := range utils.ChunkMap(dirs, batchSize) {
 		tx, err := db.BeginTx(context.Background(), nil)
 		if err != nil {
@@ -185,7 +185,7 @@ func UpdateDirectorySideMtime(db DBTX, dirID int, sideMtime int64) error {
 	return nil
 }
 
-func DeleteDirectories(db *sql.DB, dirs map[string]lib.DirDB) error {
+func DeleteDirectories(db *sql.DB, dirs map[string]Directory) error {
 	for _, chunk := range utils.ChunkMap(dirs, batchSize) {
 		tx, err := db.BeginTx(context.Background(), nil)
 		if err != nil {
@@ -276,14 +276,12 @@ func DeleteDirectories(db *sql.DB, dirs map[string]lib.DirDB) error {
 	return nil
 }
 
-func SaveArtist(db DBTX, artistInput *lib.Artist) (*lib.ArtistDB, error) {
-	artist := &lib.ArtistDB{}
-
+func SaveArtist(db DBTX, artist *Artist) (*Artist, error) {
 	err := db.QueryRow(`
 		INSERT INTO artists (name)
 		VALUES (?)
 		RETURNING id, name`,
-		artistInput.Name,
+		artist.Name,
 	).Scan(&artist.ID, &artist.Name)
 
 	if err != nil {
@@ -374,7 +372,6 @@ func SaveArtistRelation(db DBTX, artistID, relatedArtistID int) error {
 			(artist_id, related_artist_id)
 		VALUES (?, ?)
 	`, artistID, relatedArtistID)
-
 	return err
 }
 
@@ -383,24 +380,19 @@ func DeleteArtistRelation(db DBTX, artistID, relatedArtistID int) error {
 		DELETE FROM artist_relations
 		WHERE artist_id = ? AND related_artist_id = ?
 	`, artistID, relatedArtistID)
-
 	return err
 }
 
-func SaveAlbum(db DBTX, albumInput *lib.Album) (*lib.AlbumDB, error) {
-	album := &lib.AlbumDB{}
-
+func SaveAlbum(db DBTX, album *Album) (*Album, error) {
 	err := db.QueryRow(`
 		INSERT INTO albums (artist_id, title, year)
 		VALUES (?, ?, ?)
 		RETURNING id, artist_id, title, year`,
-		albumInput.ArtistID, albumInput.Title, albumInput.Year,
+		album.ArtistID, album.Title, album.Year,
 	).Scan(&album.ID, &album.ArtistID, &album.Title, &album.Year)
-
 	if err != nil {
 		return nil, err
 	}
-
 	return album, nil
 }
 
@@ -409,13 +401,13 @@ func GetArtistKey(artistName string) string {
 }
 
 func GetOrAddArtist(db DBTX, artistName string) (int, error) {
-	ct := lib.GetImportContext()
+	ct := appContext.GetImportContext()
 	id, ok := ct.ArtistCache[GetArtistKey(artistName)]
 	if !ok {
-		artist, err := GetArtist(db, lib.ArtistsGetParams{Name: utils.Ptr(artistName)})
+		artist, err := GetArtist(db, ArtistsGetParams{Name: utils.Ptr(artistName)})
 		if err != nil {
 			if errors.Is(err, ErrArtistNotFound) {
-				artistInput := &lib.Artist{Name: artistName}
+				artistInput := &Artist{Name: artistName}
 				artist, err = SaveArtist(db, artistInput)
 				if err != nil {
 					return 0, err
@@ -436,8 +428,8 @@ func GetAlbumKey(artistName string, albumName string) string {
 	return strings.ToLower(artistName + "|" + albumName)
 }
 
-func GetOrAddAlbum(db DBTX, artistID int, track *lib.Track) (int, error) {
-	ct := lib.GetImportContext()
+func GetOrAddAlbum(db DBTX, artistID int, track *Track) (int, error) {
+	ct := appContext.GetImportContext()
 	albumArtist := utils.FirstNonEmpty(
 		track.AlbumArtist,
 		track.Artist,
@@ -446,13 +438,13 @@ func GetOrAddAlbum(db DBTX, artistID int, track *lib.Track) (int, error) {
 	key := GetAlbumKey(albumArtist, track.Album)
 	id, ok := ct.AlbumCache[key]
 	if !ok {
-		album, err := GetAlbum(db, lib.AlbumsGetParams{
+		album, err := GetAlbum(db, AlbumsGetParams{
 			ArtistID: utils.Ptr(artistID),
 			Title:    utils.Ptr(track.Album),
 		})
 		if err != nil {
 			if errors.Is(err, ErrAlbumNotFound) {
-				albumInput := &lib.Album{
+				albumInput := &Album{
 					ArtistID: artistID,
 					Title:    track.Album,
 					Year:     track.Year,
@@ -473,7 +465,7 @@ func GetOrAddAlbum(db DBTX, artistID int, track *lib.Track) (int, error) {
 	return id, nil
 }
 
-func SaveTrackWithRelations(db DBTX, dirID int, track *lib.Track) (int, int, int, *lib.Track, error) {
+func SaveTrackWithRelations(db DBTX, dirID int, track *Track) (int, int, int, error) {
 	albumArtist := utils.FirstNonEmpty(
 		track.AlbumArtist,
 		track.Artist,
@@ -481,11 +473,11 @@ func SaveTrackWithRelations(db DBTX, dirID int, track *lib.Track) (int, int, int
 	)
 	albumArtistID, err := GetOrAddArtist(db, albumArtist)
 	if err != nil {
-		return 0, 0, 0, nil, err
+		return 0, 0, 0, err
 	}
 	albumID, err := GetOrAddAlbum(db, albumArtistID, track)
 	if err != nil {
-		return 0, 0, 0, nil, err
+		return 0, 0, 0, err
 	}
 	track.AlbumID = albumID
 
@@ -496,13 +488,13 @@ func SaveTrackWithRelations(db DBTX, dirID int, track *lib.Track) (int, int, int
 	)
 	artistID, err := GetOrAddArtist(db, trackArtist)
 	if err != nil {
-		return 0, 0, 0, nil, err
+		return 0, 0, 0, err
 	}
-	t, err := SaveTrack(db, dirID, artistID, track)
-	return albumID, albumArtistID, artistID, t, err
+	err = SaveTrack(db, dirID, artistID, track)
+	return albumID, albumArtistID, artistID, err
 }
 
-func SaveTrack(db DBTX, dirID int, artistID int, track *lib.Track) (*lib.Track, error) {
+func SaveTrack(db DBTX, dirID int, artistID int, track *Track) error {
 	err := db.QueryRow(`
 		INSERT INTO tracks (
 			album_id, directory_id, artist_id, path, file_type, title, year,
@@ -516,12 +508,12 @@ func SaveTrack(db DBTX, dirID int, artistID int, track *lib.Track) (*lib.Track, 
 		track.PregapDuration, track.Lyrics, track.IsCue, track.CueFile, track.CueOffset,
 	).Scan(&track.ID)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return track, nil
+	return nil
 }
 
-func SaveImage(db DBTX, img *lib.Image) (*lib.Image, error) {
+func SaveImage(db DBTX, img *Image) error {
 	err := db.QueryRow(`
 		INSERT INTO images (
 			directory_id, track_id, artist_id, path, type, format,
@@ -533,16 +525,16 @@ func SaveImage(db DBTX, img *lib.Image) (*lib.Image, error) {
 		img.Order, img.Width, img.Height, img.Size, img.Mtime,
 	).Scan(&img.ID)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return img, nil
+	return nil
 }
 
-func getImages(db DBTX, params lib.ImagesGetParams) ([]lib.Image, error) {
+func getImages(db DBTX, params ImagesGetParams) ([]Image, error) {
 	if len(params.DirectoryIDs) == 0 &&
 		len(params.TrackIDs) == 0 &&
 		len(params.ArtistIDs) == 0 {
-		return []lib.Image{}, nil
+		return []Image{}, nil
 	}
 
 	var sb strings.Builder
@@ -621,10 +613,10 @@ func getImages(db DBTX, params lib.ImagesGetParams) ([]lib.Image, error) {
 	}
 	defer rows.Close()
 
-	images := make([]lib.Image, 0)
+	images := make([]Image, 0)
 
 	for rows.Next() {
-		var img lib.Image
+		var img Image
 
 		if err := rows.Scan(
 			&img.ID, &img.DirectoryID, &img.TrackID, &img.ArtistID, &img.Path, &img.Type, &img.Format,
@@ -643,35 +635,35 @@ func getImages(db DBTX, params lib.ImagesGetParams) ([]lib.Image, error) {
 	return images, nil
 }
 
-func GetImagesFlat(db DBTX, params lib.ImagesGetParams) ([]lib.Image, error) {
+func GetImagesFlat(db DBTX, params ImagesGetParams) ([]Image, error) {
 	return getImages(db, params)
 }
 
-func GetImages(db DBTX, params lib.ImagesGetParams) (map[int][]lib.Image, error) {
+func GetImages(db DBTX, params ImagesGetParams) (map[int][]Image, error) {
 	images, err := getImages(db, params)
 	if err != nil {
 		return nil, err
 	}
 
-	result := make(map[int][]lib.Image)
+	result := make(map[int][]Image)
 
 	for _, img := range images {
 		var key int
 
 		switch params.GroupBy {
-		case lib.ImageGroupByArtist:
+		case ImageGroupByArtist:
 			if img.ArtistID == nil {
 				continue
 			}
 			key = *img.ArtistID
 
-		case lib.ImageGroupByDirectory:
+		case ImageGroupByDirectory:
 			if img.DirectoryID == nil {
 				continue
 			}
 			key = *img.DirectoryID
 
-		case lib.ImageGroupByTrack:
+		case ImageGroupByTrack:
 			if img.TrackID == nil {
 				continue
 			}
@@ -738,8 +730,8 @@ func DeleteImage(db DBTX, imageID int) error {
 
 var ErrTrackNotFound = errors.New("track not found")
 
-func GetTrack(db *sql.DB, ID int) (*lib.TrackDB, error) {
-	tracks, _, err := GetTracks(db, lib.TracksGetParams{ID: utils.Ptr(ID)})
+func GetTrack(db DBTX, ID int) (*Track, error) {
+	tracks, _, err := GetTracks(db, TracksGetParams{ID: utils.Ptr(ID)})
 	if err != nil {
 		return nil, err
 	}
@@ -749,8 +741,8 @@ func GetTrack(db *sql.DB, ID int) (*lib.TrackDB, error) {
 	return &tracks[0], nil
 }
 
-func GetTrackByPath(db *sql.DB, path string) (*lib.TrackDB, error) {
-	tracks, _, err := GetTracks(db, lib.TracksGetParams{
+func GetTrackByPath(db DBTX, path string) (*Track, error) {
+	tracks, _, err := GetTracks(db, TracksGetParams{
 		Path:  utils.Ptr(path),
 		Limit: 1,
 	})
@@ -763,7 +755,7 @@ func GetTrackByPath(db *sql.DB, path string) (*lib.TrackDB, error) {
 	return &tracks[0], nil
 }
 
-func GetTracks(db *sql.DB, params lib.TracksGetParams) ([]lib.TrackDB, bool, error) {
+func GetTracks(db DBTX, params TracksGetParams) ([]Track, bool, error) {
 	var sb strings.Builder
 
 	sb.WriteString(`
@@ -852,11 +844,11 @@ func GetTracks(db *sql.DB, params lib.TracksGetParams) ([]lib.TrackDB, bool, err
 	}
 	defer rows.Close()
 
-	var tracks []lib.TrackDB
+	var tracks []Track
 
 	var countRows int
 	for rows.Next() {
-		var t lib.TrackDB
+		var t Track
 
 		err := rows.Scan(&t.ID, &t.Path, &t.FileType, &t.Title, &t.Artist, &t.ArtistID,
 			&t.AlbumArtist, &t.Year, &t.Genre, &t.Album, &t.AlbumID, &t.TrackNumber,
@@ -879,7 +871,7 @@ func GetTracks(db *sql.DB, params lib.TracksGetParams) ([]lib.TrackDB, bool, err
 
 var ErrNothingToUpdate = errors.New("nothing to update in track")
 
-func UpdateTrack(db DBTX, trackID int, params lib.TrackUpdateParams) error {
+func UpdateTrack(db DBTX, trackID int, params TrackUpdateParams) error {
 	sets := []string{}
 	args := []any{}
 
@@ -918,7 +910,7 @@ func UpdateTrack(db DBTX, trackID int, params lib.TrackUpdateParams) error {
 
 var ErrArtistNotFound = errors.New("artist not found")
 
-func GetArtist(db DBTX, params lib.ArtistsGetParams) (*lib.ArtistDB, error) {
+func GetArtist(db DBTX, params ArtistsGetParams) (*Artist, error) {
 	artists, _, err := GetArtists(db, params)
 	if err != nil {
 		return nil, err
@@ -929,7 +921,7 @@ func GetArtist(db DBTX, params lib.ArtistsGetParams) (*lib.ArtistDB, error) {
 	return &artists[0], nil
 }
 
-func GetArtists(db DBTX, params lib.ArtistsGetParams) ([]lib.ArtistDB, bool, error) {
+func GetArtists(db DBTX, params ArtistsGetParams) ([]Artist, bool, error) {
 	var sb strings.Builder
 
 	sb.WriteString(`SELECT id, name FROM artists`)
@@ -997,11 +989,11 @@ func GetArtists(db DBTX, params lib.ArtistsGetParams) ([]lib.ArtistDB, bool, err
 	}
 	defer rows.Close()
 
-	var artists []lib.ArtistDB
+	var artists []Artist
 
 	var countRows int
 	for rows.Next() {
-		var t lib.ArtistDB
+		var t Artist
 
 		err := rows.Scan(&t.ID, &t.Name)
 		if err != nil {
@@ -1021,7 +1013,7 @@ func GetArtists(db DBTX, params lib.ArtistsGetParams) ([]lib.ArtistDB, bool, err
 
 var ErrAlbumNotFound = errors.New("album not found")
 
-func GetAlbum(db DBTX, params lib.AlbumsGetParams) (*lib.AlbumDB, error) {
+func GetAlbum(db DBTX, params AlbumsGetParams) (*Album, error) {
 	albums, _, err := GetAlbums(db, params)
 	if err != nil {
 		return nil, err
@@ -1032,7 +1024,7 @@ func GetAlbum(db DBTX, params lib.AlbumsGetParams) (*lib.AlbumDB, error) {
 	return &albums[0], nil
 }
 
-func GetAlbums(db DBTX, params lib.AlbumsGetParams) ([]lib.AlbumDB, bool, error) {
+func GetAlbums(db DBTX, params AlbumsGetParams) ([]Album, bool, error) {
 	var sb strings.Builder
 
 	sb.WriteString(`
@@ -1098,11 +1090,11 @@ func GetAlbums(db DBTX, params lib.AlbumsGetParams) ([]lib.AlbumDB, bool, error)
 	}
 	defer rows.Close()
 
-	var albums []lib.AlbumDB
+	var albums []Album
 
 	var countRows int
 	for rows.Next() {
-		var t lib.AlbumDB
+		var t Album
 
 		err := rows.Scan(&t.ID, &t.Artist, &t.ArtistID, &t.Title, &t.Year)
 		if err != nil {

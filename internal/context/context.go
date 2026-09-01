@@ -1,4 +1,5 @@
-package lib
+// Package context
+package context
 
 import (
 	"sync"

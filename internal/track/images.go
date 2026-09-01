@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"image"
 	"image/color"
 	stdDraw "image/draw"
@@ -13,8 +14,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"sonary/internal/database"
-	"sonary/internal/lib"
+	db "sonary/internal/database"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,7 +27,7 @@ const CoversDir = "Covers"
 
 type ImageKeyword struct {
 	Keyword string
-	Type    lib.ImageType
+	Type    ImageType
 }
 
 type ThumbnailGenerator struct {
@@ -34,27 +35,27 @@ type ThumbnailGenerator struct {
 }
 
 type EmbeddedImage struct {
-	Image lib.Image
+	Image db.Image
 	Data  []byte
 	Ext   string
 }
 
 // order matters - the first matching keyword wins
 var imageKeywords = []ImageKeyword{
-	{"front", lib.ImageTypeFront},
-	{"folder", lib.ImageTypeFront},
-	{"cover", lib.ImageTypeFront},
-	{"back", lib.ImageTypeBack},
-	{"disc", lib.ImageTypeDisc},
-	{"cd", lib.ImageTypeDisc},
-	{"dvd", lib.ImageTypeDisc},
-	{"bd", lib.ImageTypeDisc},
-	{"booklet", lib.ImageTypeBooklet},
-	{"inlay", lib.ImageTypeInlay},
-	{"inside", lib.ImageTypeInside},
-	{"digi", lib.ImageTypeDigipack},
-	{"slip", lib.ImageTypeSlipcase},
-	{"sticker", lib.ImageTypeSticker},
+	{"front", ImageTypeFront},
+	{"folder", ImageTypeFront},
+	{"cover", ImageTypeFront},
+	{"back", ImageTypeBack},
+	{"disc", ImageTypeDisc},
+	{"cd", ImageTypeDisc},
+	{"dvd", ImageTypeDisc},
+	{"bd", ImageTypeDisc},
+	{"booklet", ImageTypeBooklet},
+	{"inlay", ImageTypeInlay},
+	{"inside", ImageTypeInside},
+	{"digi", ImageTypeDigipack},
+	{"slip", ImageTypeSlipcase},
+	{"sticker", ImageTypeSticker},
 }
 
 func isArtistLogo(name string) bool {
@@ -147,7 +148,7 @@ func (s *DirectoryScanner) processEmbeddedImages() error {
 		}
 
 		// get track by path
-		track, err := database.GetTrackByPath(s.DB, fullPath)
+		track, err := db.GetTrackByPath(s.DB, fullPath)
 		if err != nil {
 			return err
 		}
@@ -179,14 +180,14 @@ func (s *DirectoryScanner) syncEmbeddedImages() error {
 		return nil
 	}
 
-	oldImages, err := database.GetImagesFlat(s.DB, lib.ImagesGetParams{
+	oldImages, err := db.GetImagesFlat(s.DB, db.ImagesGetParams{
 		TrackIDs: trackIDs,
 	})
 	if err != nil {
 		return err
 	}
 
-	oldByTrack := make(map[int]lib.Image)
+	oldByTrack := make(map[int]db.Image)
 
 	for _, img := range oldImages {
 		if img.TrackID == nil {
@@ -195,7 +196,7 @@ func (s *DirectoryScanner) syncEmbeddedImages() error {
 		oldByTrack[*img.TrackID] = img
 	}
 
-	newByTrack := make(map[int]lib.Image)
+	newByTrack := make(map[int]db.Image)
 
 	for _, img := range s.EmbeddedImages {
 		if img.Image.TrackID == nil {
@@ -204,7 +205,7 @@ func (s *DirectoryScanner) syncEmbeddedImages() error {
 		newByTrack[*img.Image.TrackID] = img.Image
 	}
 
-	var imagesToDelete []lib.Image
+	var imagesToDelete []db.Image
 	var imagesToSave []EmbeddedImage
 
 	// old images
@@ -263,13 +264,13 @@ func (s *DirectoryScanner) syncEmbeddedImages() error {
 	defer tx.Rollback()
 
 	for _, img := range imagesToDelete {
-		if err := database.DeleteImage(tx, img.ID); err != nil {
+		if err := db.DeleteImage(tx, img.ID); err != nil {
 			return err
 		}
 	}
 
 	for i := range imagesToSave {
-		if _, err := database.SaveImage(tx, &imagesToSave[i].Image); err != nil {
+		if err := db.SaveImage(tx, &imagesToSave[i].Image); err != nil {
 			return err
 		}
 	}
@@ -293,7 +294,7 @@ func (s *DirectoryScanner) syncEmbeddedImages() error {
 	}
 
 	if len(imagesToSave) > 0 {
-		imgs := make([]lib.Image, 0, len(imagesToSave))
+		imgs := make([]db.Image, 0, len(imagesToSave))
 		for _, img := range imagesToSave {
 			imgs = append(imgs, img.Image)
 		}
@@ -306,9 +307,9 @@ func (s *DirectoryScanner) syncEmbeddedImages() error {
 }
 
 func (s *DirectoryScanner) buildEmbeddedImage(
-	track lib.TrackDB,
+	track db.Track,
 	embedded EmbeddedImage,
-) (*lib.Image, error) {
+) (*db.Image, error) {
 	if embedded.Ext == "" {
 		return nil, fmt.Errorf("embedded image has no extension: track_id=%d", track.ID)
 	}
@@ -327,12 +328,12 @@ func (s *DirectoryScanner) buildEmbeddedImage(
 		return nil, err
 	}
 
-	return &lib.Image{
+	return &db.Image{
 		TrackID:     &track.ID,
 		DirectoryID: nil,
 		Path:        filepath.Join("embedded", filepath.Base(path)),
 		FullPath:    path,
-		Type:        lib.ImageTypeMainFront,
+		Type:        int(ImageTypeMainFront),
 		Format:      format,
 		Order:       0,
 		Width:       cfg.Width,
@@ -374,11 +375,11 @@ func (s *DirectoryScanner) checkImage(entry os.DirEntry, relImgPath string, inCo
 		if err != nil {
 			return err
 		}
-		s.Images = append(s.Images, lib.Image{
+		s.Images = append(s.Images, db.Image{
 			DirectoryID: &s.Dir.ID,
 			Path:        relImgPath,
 			FullPath:    fullPath,
-			Type:        s.detectImageType(entry.Name(), inCovers),
+			Type:        int(s.detectImageType(entry.Name(), inCovers)),
 			Format:      cfg.Format,
 			Order:       s.ImageOrder,
 			Width:       cfg.Width,
@@ -391,29 +392,29 @@ func (s *DirectoryScanner) checkImage(entry os.DirEntry, relImgPath string, inCo
 	return nil
 }
 
-func (s *DirectoryScanner) detectImageType(name string, inCovers bool) lib.ImageType {
+func (s *DirectoryScanner) detectImageType(name string, inCovers bool) ImageType {
 	n := strings.ToLower(name)
 
 	// artist logo
 	if isArtistLogo(n) {
-		return lib.ImageTypeArtistLogo
+		return ImageTypeArtistLogo
 	}
 
 	for _, t := range imageKeywords {
 		if strings.Contains(n, t.Keyword) {
 			// Front.jpg next to the music is the album's main image
-			if !inCovers && t.Type == lib.ImageTypeFront && !s.MainFrontFound {
+			if !inCovers && t.Type == ImageTypeFront && !s.MainFrontFound {
 				s.MainFrontFound = true
-				return lib.ImageTypeMainFront
+				return ImageTypeMainFront
 			}
 			return t.Type
 		}
 	}
-	return lib.ImageTypeOther
+	return ImageTypeOther
 }
 
 func (s *DirectoryScanner) syncImages() error {
-	imagesByDirectory, err := database.GetImages(s.DB, lib.ImagesGetParams{
+	imagesByDirectory, err := db.GetImages(s.DB, db.ImagesGetParams{
 		DirectoryIDs: []int{s.Dir.ID},
 	})
 	if err != nil {
@@ -422,19 +423,19 @@ func (s *DirectoryScanner) syncImages() error {
 
 	oldImages := imagesByDirectory[s.Dir.ID]
 
-	oldByPath := make(map[string]lib.Image, len(oldImages))
+	oldByPath := make(map[string]db.Image, len(oldImages))
 	for _, img := range oldImages {
 		oldByPath[img.Path] = img
 	}
 
-	newByPath := make(map[string]lib.Image, len(s.Images))
+	newByPath := make(map[string]db.Image, len(s.Images))
 	for _, img := range s.Images {
 		newByPath[img.Path] = img
 	}
 
 	// images that need to be removed from DB and whose thumbnails
 	// need to be removed
-	var imagesToDelete []lib.Image
+	var imagesToDelete []db.Image
 
 	for _, oldImg := range oldImages {
 		newImg, exists := newByPath[oldImg.Path]
@@ -453,7 +454,7 @@ func (s *DirectoryScanner) syncImages() error {
 
 	// images that need to be inserted into DB and whose thumbnails
 	// need to be generated
-	var imagesToSave []lib.Image
+	var imagesToSave []db.Image
 
 	for _, img := range s.Images {
 		oldImg, exists := oldByPath[img.Path]
@@ -485,7 +486,7 @@ func (s *DirectoryScanner) syncImages() error {
 	hasArtistLogo := false
 
 	for _, img := range imagesToSave {
-		if img.Type == lib.ImageTypeArtistLogo {
+		if img.Type == int(ImageTypeArtistLogo) {
 			hasArtistLogo = true
 			break
 		}
@@ -496,7 +497,7 @@ func (s *DirectoryScanner) syncImages() error {
 		if artistName == "." || artistName == "" {
 			return fmt.Errorf("invalid artist directory: %q", s.Path)
 		}
-		artistID, err := database.GetOrAddArtist(tx, artistName)
+		artistID, err := db.GetOrAddArtist(tx, artistName)
 		if err != nil {
 			return err
 		}
@@ -505,17 +506,17 @@ func (s *DirectoryScanner) syncImages() error {
 
 	// delete old/removed/changed images from DB
 	for _, img := range imagesToDelete {
-		if err := database.DeleteImage(tx, img.ID); err != nil {
+		if err := db.DeleteImage(tx, img.ID); err != nil {
 			return err
 		}
 	}
 
 	// insert new/changed images into DB
 	for i := range imagesToSave {
-		if imagesToSave[i].Type == lib.ImageTypeArtistLogo {
+		if imagesToSave[i].Type == int(ImageTypeArtistLogo) {
 			imagesToSave[i].ArtistID = s.ArtistID
 		}
-		if _, err := database.SaveImage(tx, &imagesToSave[i]); err != nil {
+		if err := db.SaveImage(tx, &imagesToSave[i]); err != nil {
 			return err
 		}
 	}
@@ -547,19 +548,19 @@ func (s *DirectoryScanner) syncImages() error {
 	return nil
 }
 
-func GetImageConfig(path string) (lib.ImageConfig, error) {
+func GetImageConfig(path string) (ImageConfig, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return lib.ImageConfig{}, err
+		return ImageConfig{}, err
 	}
 	defer f.Close()
 
 	cfg, format, err := image.DecodeConfig(f)
 	if err != nil {
-		return lib.ImageConfig{}, err
+		return ImageConfig{}, err
 	}
 
-	return lib.ImageConfig{
+	return ImageConfig{
 		Width:  cfg.Width,
 		Height: cfg.Height,
 		Format: format,
@@ -568,9 +569,9 @@ func GetImageConfig(path string) (lib.ImageConfig, error) {
 
 const thumbnailJPEGQuality = 90
 
-func (g *ThumbnailGenerator) Generate(images []lib.Image) error {
+func (g *ThumbnailGenerator) Generate(images []db.Image) error {
 	for _, img := range images {
-		for _, size := range lib.ThumbnailSizesFor(img.Type) {
+		for _, size := range ThumbnailSizesFor(ImageType(img.Type)) {
 			if err := g.generateOne(&img, size); err != nil {
 				return err
 			}
@@ -579,7 +580,7 @@ func (g *ThumbnailGenerator) Generate(images []lib.Image) error {
 	return nil
 }
 
-func (g *ThumbnailGenerator) generateOne(img *lib.Image, targetSize int) error {
+func (g *ThumbnailGenerator) generateOne(img *db.Image, targetSize int) error {
 	dstPath := g.thumbnailPath(img, targetSize)
 
 	if info, err := os.Stat(dstPath); err == nil {
@@ -683,16 +684,16 @@ func saveJPEG(dstPath string, img image.Image, mtime int64) error {
 	return os.Chtimes(dstPath, t, t)
 }
 
-func (g *ThumbnailGenerator) thumbnailPath(img *lib.Image, size int) string {
+func (g *ThumbnailGenerator) thumbnailPath(img *db.Image, size int) string {
 	return filepath.Join(
 		g.CacheDir,
 		fmt.Sprintf("%d", size),
-		lib.ThumbnailFilename(img),
+		ThumbnailFilename(img),
 	)
 }
 
-func (g *ThumbnailGenerator) Delete(img *lib.Image) error {
-	for _, size := range lib.ThumbnailSizesFor(img.Type) {
+func (g *ThumbnailGenerator) Delete(img *db.Image) error {
+	for _, size := range ThumbnailSizesFor(ImageType(img.Type)) {
 		path := g.thumbnailPath(img, size)
 		err := os.Remove(path)
 		if err != nil {
@@ -749,4 +750,39 @@ func embeddedImageExt(picture *tag.Picture) string {
 	default:
 		return ""
 	}
+}
+
+func ThumbnailFilename(img *db.Image) string {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(img.Path))
+
+	if img.DirectoryID == nil {
+		return fmt.Sprintf(
+			"embedded_%02d_%016x.jpg",
+			img.Type,
+			h.Sum64(),
+		)
+	}
+
+	return fmt.Sprintf(
+		"%d_%02d_%016x.jpg",
+		*img.DirectoryID,
+		img.Type,
+		h.Sum64(),
+	)
+}
+
+func ThumbnailURL(img *db.Image, size int) string {
+	return "/api/v1/images/" +
+		strconv.Itoa(size) + "/" +
+		ThumbnailFilename(img)
+}
+
+func ImageURLs(img *db.Image, tp ImageType) ImageSizes {
+	sizes := ThumbnailSizesFor(tp)
+	result := make(ImageSizes, len(sizes))
+	for _, size := range sizes {
+		result[size] = ThumbnailURL(img, size)
+	}
+	return result
 }

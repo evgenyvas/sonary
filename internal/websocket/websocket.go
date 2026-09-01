@@ -4,7 +4,7 @@ package websocket
 import (
 	"log"
 	"net/http"
-	"sonary/internal/lib"
+	"sonary/internal/context"
 	"sonary/utils"
 	"sync"
 
@@ -168,12 +168,12 @@ func WsEndpoint(w http.ResponseWriter, r *http.Request) {
 	defer func() { hub.unregister <- ws }()
 
 	// after client connect get progress percent
-	ct := lib.GetImportContext()
+	ct := context.GetImportContext()
 	if ct.Progress.Total > 0 {
 		processed := int(ct.Progress.Processed.Load())
 		hub.Send <- ProgressEvent{
 			BaseEvent: BaseEvent{UserID: userID},
-			Type:      lib.EventImportProgressUpdate,
+			Type:      context.EventImportProgressUpdate,
 			Progress:  utils.GetPercent(processed, ct.Progress.Total),
 		}
 	}

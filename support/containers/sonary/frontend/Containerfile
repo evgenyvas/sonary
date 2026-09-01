@@ -1,0 +1,9 @@
+FROM node:22-alpine
+
+WORKDIR /app/frontend
+
+# Expose Vite Dev Server port
+EXPOSE 3000
+
+# Vite requires --host flag to allow connections from outside the container
+CMD ["sh", "-c", "yarn install && yarn dev --host"]

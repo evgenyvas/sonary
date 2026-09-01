@@ -1,0 +1,14 @@
+# syntax=docker/dockerfile:1
+# podman: --network=host
+
+FROM golang:1.26-alpine
+
+RUN apk add --no-cache ffmpeg
+
+WORKDIR /app
+
+EXPOSE 8080
+
+ENV APP_ENV=dev
+CMD ["go", "run", "sonary.go"]
+#CMD ["sleep", "infinity"]

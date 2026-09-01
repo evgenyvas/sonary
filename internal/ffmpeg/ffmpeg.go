@@ -8,7 +8,10 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"sonary/internal/lib"
+	"path/filepath"
+	"sonary/internal/context"
+	db "sonary/internal/database"
+	"sonary/internal/track"
 	"sonary/internal/websocket"
 	"strconv"
 	"strings"
@@ -30,6 +33,18 @@ type Metadata struct {
 //Stream(ctx context.Context, src string, w io.Writer) error
 //}
 
+func (f *FFmpeg) getInputFormatArgs(path string) []string {
+	// Some old FL Studio files have an .mp3 extension and contain valid
+	// MP3 data, but FFmpeg 8.x may incorrectly detect them as WAV because
+	// of their malformed/legacy header.
+	//
+	// For .mp3 files, force the MP3 demuxer to handle these files.
+	if strings.EqualFold(filepath.Ext(path), ".mp3") {
+		return []string{"-f", "mp3", "-i", path}
+	}
+	return []string{"-i", path}
+}
+
 func NewFFmpeg() *FFmpeg {
 	return &FFmpeg{
 		FFmpegPath:  "ffmpeg",
@@ -40,13 +55,13 @@ func NewFFmpeg() *FFmpeg {
 func (f *FFmpeg) Duration(path string) (time.Duration, error) {
 	log.Printf("Getting track duration via ffmpeg...'%s'\n", path)
 
-	cmd := exec.Command(
-		f.FFprobePath,
-		"-v", "error",
+	args := []string{"-v", "error"}
+	args = append(args, f.getInputFormatArgs(path)...)
+	args = append(args,
 		"-show_entries", "format=duration",
 		"-of", "default=noprint_wrappers=1:nokey=1",
-		path,
 	)
+	cmd := exec.Command(f.FFprobePath, args...)
 
 	out, err := cmd.Output()
 	if err != nil {
@@ -67,18 +82,18 @@ func (f *FFmpeg) Duration(path string) (time.Duration, error) {
 	return time.Duration(seconds * float64(time.Second)), nil
 }
 
-func (f *FFmpeg) getTrackConvertArgs(track *lib.TrackDB, params lib.ConvertParams) ([]string, error) {
-	args := []string{"-i", track.Path, "-vn"}
+func (f *FFmpeg) getTrackConvertArgs(t *db.Track, params track.ConvertParams) ([]string, error) {
+	args := append(f.getInputFormatArgs(t.Path), "-vn")
 
 	// for CUE calculate offset
-	if track.IsCue {
-		start := track.CueOffset
-		duration := track.Duration
+	if t.IsCue {
+		start := t.CueOffset
+		duration := t.Duration
 
 		// add pregap if user wants
-		if params.IncludePregap && track.HasPregap {
-			start = track.CueOffset - track.PregapDuration
-			duration = track.Duration + track.PregapDuration
+		if params.IncludePregap && t.HasPregap {
+			start = t.CueOffset - t.PregapDuration
+			duration = t.Duration + t.PregapDuration
 		}
 
 		args = append(args, "-ss", fmt.Sprintf("%.3f", start.Seconds()), "-t", fmt.Sprintf("%.3f", duration.Seconds()))
@@ -111,31 +126,31 @@ func (f *FFmpeg) getTrackConvertArgs(track *lib.TrackDB, params lib.ConvertParam
 	// ID3v2.3 better for audio stream
 	args = append(args, "-id3v2_version", "3")
 
-	if track.Title != "" {
-		args = append(args, "-metadata", "title="+track.Title)
+	if t.Title != "" {
+		args = append(args, "-metadata", "title="+t.Title)
 	}
-	if track.Artist != "" {
-		args = append(args, "-metadata", "artist="+track.Artist)
+	if t.Artist != "" {
+		args = append(args, "-metadata", "artist="+t.Artist)
 	}
-	if track.Album != "" {
-		args = append(args, "-metadata", "album="+track.Album)
+	if t.Album != "" {
+		args = append(args, "-metadata", "album="+t.Album)
 	}
-	if track.TrackNumber != 0 {
-		args = append(args, "-metadata", "track="+strconv.Itoa(track.TrackNumber))
+	if t.TrackNumber != 0 {
+		args = append(args, "-metadata", "track="+strconv.Itoa(t.TrackNumber))
 	}
-	if track.Year != 0 {
-		args = append(args, "-metadata", "date="+strconv.Itoa(track.Year))
+	if t.Year != 0 {
+		args = append(args, "-metadata", "date="+strconv.Itoa(t.Year))
 	}
-	if track.Genre != "" {
-		args = append(args, "-metadata", "genre="+track.Genre)
+	if t.Genre != "" {
+		args = append(args, "-metadata", "genre="+t.Genre)
 	}
 	return args, nil
 }
 
-func (f *FFmpeg) ConvertTrackStream(track *lib.TrackDB, params lib.ConvertParams,
+func (f *FFmpeg) ConvertTrackStream(t *db.Track, params track.ConvertParams,
 	outputStream io.Writer) error {
 
-	args, err := f.getTrackConvertArgs(track, params)
+	args, err := f.getTrackConvertArgs(t, params)
 	if err != nil {
 		return err
 	}
@@ -144,7 +159,7 @@ func (f *FFmpeg) ConvertTrackStream(track *lib.TrackDB, params lib.ConvertParams
 	args = append(args, "-f", params.Format, "pipe:1")
 
 	// Initialize and pipe the command
-	cmd := exec.Command("ffmpeg", args...)
+	cmd := exec.Command(f.FFmpegPath, args...)
 
 	// Bind the incoming io.Writer directly to FFmpeg's standard output
 	cmd.Stdout = outputStream
@@ -165,19 +180,19 @@ func (f *FFmpeg) ConvertTrackStream(track *lib.TrackDB, params lib.ConvertParams
 	return nil
 }
 
-func sendConvertProgress(userID string, progress int, status string, track *lib.TrackDB) {
+func sendConvertProgress(userID string, progress int, status string, t *db.Track) {
 	hub := websocket.GetHub()
 	hub.Send <- websocket.ProgressTrackConvertEvent{
 		BaseEvent:  websocket.BaseEvent{UserID: userID},
-		Type:       lib.EventConvertTrackProgressUpdate,
+		Type:       context.EventConvertTrackProgressUpdate,
 		Progress:   progress,
 		Status:     status,
-		TrackID:    track.ID,
-		TrackTitle: track.Title,
+		TrackID:    t.ID,
+		TrackTitle: t.Title,
 	}
 }
 
-func sendConvertError(userID string, err error, track *lib.TrackDB) {
+func sendConvertError(userID string, err error, t *db.Track) {
 	hub := websocket.GetHub()
 	hub.Send <- websocket.MessageEvent{
 		BaseEvent: websocket.BaseEvent{UserID: userID},
@@ -187,29 +202,29 @@ func sendConvertError(userID string, err error, track *lib.TrackDB) {
 
 	hub.Send <- websocket.ProgressTrackConvertEvent{
 		BaseEvent:  websocket.BaseEvent{UserID: userID},
-		Type:       lib.EventConvertTrackProgressUpdate,
+		Type:       context.EventConvertTrackProgressUpdate,
 		Status:     websocket.ConvertStatusFailed,
-		TrackID:    track.ID,
-		TrackTitle: track.Title,
+		TrackID:    t.ID,
+		TrackTitle: t.Title,
 	}
 }
 
-func (f *FFmpeg) ConvertFile(track *lib.TrackDB,
-	params lib.ConvertParams,
+func (f *FFmpeg) ConvertFile(t *db.Track,
+	params track.ConvertParams,
 	targetUserID string) (string, error) {
 
 	st := params.ToString()
 
 	// create temporary file
-	tmpFile, err := os.CreateTemp("", "track_"+strconv.Itoa(track.ID)+"_"+st+"_*.mp3")
+	tmpFile, err := os.CreateTemp("", "track_"+strconv.Itoa(t.ID)+"_"+st+"_*.mp3")
 	if err != nil {
-		sendConvertError(targetUserID, err, track)
+		sendConvertError(targetUserID, err, t)
 		return "", fmt.Errorf("failed to create temporary file: %w", err)
 	}
 	tmpPath := tmpFile.Name()
 	tmpFile.Close()
 
-	args, err := f.getTrackConvertArgs(track, params)
+	args, err := f.getTrackConvertArgs(t, params)
 	if err != nil {
 		return "", err
 	}
@@ -217,25 +232,25 @@ func (f *FFmpeg) ConvertFile(track *lib.TrackDB,
 	// ask FFmpeg to output technical progress logging to stderr
 	args = append(args, "-progress", "pipe:2", "-y", tmpPath)
 
-	cmd := exec.Command("ffmpeg", args...)
+	cmd := exec.Command(f.FFmpegPath, args...)
 
 	// intercept Stderr to read logs line by line
 	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
-		sendConvertError(targetUserID, err, track)
+		sendConvertError(targetUserID, err, t)
 		return "", fmt.Errorf("failed to get Stderr pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
-		sendConvertError(targetUserID, err, track)
+		sendConvertError(targetUserID, err, t)
 		return "", fmt.Errorf("failed to start ffmpeg: %w", err)
 	}
 
 	// track duration
-	totalDuration := track.Duration
+	totalDuration := t.Duration
 	// add pregap if user wants
-	if params.IncludePregap && track.HasPregap {
-		totalDuration = track.Duration + track.PregapDuration
+	if params.IncludePregap && t.HasPregap {
+		totalDuration = t.Duration + t.PregapDuration
 	}
 
 	// read FFmpeg output
@@ -258,7 +273,7 @@ func (f *FFmpeg) ConvertFile(track *lib.TrackDB,
 					percent = 0
 				}
 
-				sendConvertProgress(targetUserID, percent, websocket.ConvertStatusProcessing, track)
+				sendConvertProgress(targetUserID, percent, websocket.ConvertStatusProcessing, t)
 			}
 		}
 	}()
@@ -266,14 +281,14 @@ func (f *FFmpeg) ConvertFile(track *lib.TrackDB,
 	// wait for FFmpeg complete
 	if err := cmd.Wait(); err != nil {
 		os.Remove(tmpPath)
-		sendConvertError(targetUserID, err, track)
+		sendConvertError(targetUserID, err, t)
 		return "", fmt.Errorf("failed to complete ffmpeg: %w", err)
 	}
 
-	ct := lib.GetConvertContext()
-	ct.Cache.Store(strconv.Itoa(track.ID)+"_"+st, tmpPath)
+	ct := context.GetConvertContext()
+	ct.Cache.Store(strconv.Itoa(t.ID)+"_"+st, tmpPath)
 
-	sendConvertProgress(targetUserID, 100, websocket.ConvertStatusCompleted, track)
+	sendConvertProgress(targetUserID, 100, websocket.ConvertStatusCompleted, t)
 
 	return tmpPath, nil
 }

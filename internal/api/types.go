@@ -1,9 +1,9 @@
-package lib
+package api
 
 import (
 	"fmt"
-	"hash/fnv"
-	"strconv"
+	db "sonary/internal/database"
+	"sonary/internal/track"
 )
 
 type APIStatus struct {
@@ -11,26 +11,24 @@ type APIStatus struct {
 	Message string `json:"message"`
 }
 
-type APIImageSizes map[int]string
-
 type APITrack struct {
-	ID             int           `json:"id"`
-	FileType       string        `json:"type"`
-	Title          string        `json:"title"`
-	Artist         string        `json:"artist"`
-	ArtistID       int           `json:"artist_id"`
-	AlbumArtist    string        `json:"albumArtist"`
-	Year           int           `json:"year"`
-	Genre          string        `json:"genre"`
-	Album          string        `json:"album"`
-	AlbumID        int           `json:"album_id"`
-	Cover          APIImageSizes `json:"cover,omitempty"`
-	TrackNumber    int           `json:"number"`
-	Duration       int           `json:"duration"`
-	HasPregap      bool          `json:"pregap"`
-	PregapDuration int           `json:"pregap_duration"`
-	Lyrics         string        `json:"lyrics"`
-	IsLike         bool          `json:"like"`
+	ID             int              `json:"id"`
+	FileType       string           `json:"type"`
+	Title          string           `json:"title"`
+	Artist         string           `json:"artist"`
+	ArtistID       int              `json:"artist_id"`
+	AlbumArtist    string           `json:"albumArtist"`
+	Year           int              `json:"year"`
+	Genre          string           `json:"genre"`
+	Album          string           `json:"album"`
+	AlbumID        int              `json:"album_id"`
+	Cover          track.ImageSizes `json:"cover,omitempty"`
+	TrackNumber    int              `json:"number"`
+	Duration       int              `json:"duration"`
+	HasPregap      bool             `json:"pregap"`
+	PregapDuration int              `json:"pregap_duration"`
+	Lyrics         string           `json:"lyrics"`
+	IsLike         bool             `json:"like"`
 }
 
 type APITrackSingle struct {
@@ -53,7 +51,7 @@ type APIProgress struct {
 	Processed int `json:"processed"`
 }
 
-func (t *TrackDB) ToAPI() APITrack {
+func TrackToAPI(t *db.Track) APITrack {
 	return APITrack{
 		ID:             t.ID,
 		FileType:       t.FileType,
@@ -115,10 +113,10 @@ func (m *FetchArtistsMode) UnmarshalText(text []byte) error {
 }
 
 type APIArtist struct {
-	ID     int           `json:"id"`
-	Name   string        `json:"name"`
-	Logo   APIImageSizes `json:"logo,omitempty"`
-	Images []APIImage    `json:"images"`
+	ID     int              `json:"id"`
+	Name   string           `json:"name"`
+	Logo   track.ImageSizes `json:"logo,omitempty"`
+	Images []APIImage       `json:"images"`
 }
 
 type APIArtistSingle struct {
@@ -133,7 +131,7 @@ type APIArtistList struct {
 	HasNext bool        `json:"next"`
 }
 
-func (t *ArtistDB) ToAPI() APIArtist {
+func ArtistToAPI(t *db.Artist) APIArtist {
 	return APIArtist{
 		ID:   t.ID,
 		Name: t.Name,
@@ -147,14 +145,14 @@ type APIImage struct {
 }
 
 type APIAlbum struct {
-	ID         int           `json:"id"`
-	Artist     string        `json:"artist"`
-	ArtistID   int           `json:"artist_id"`
-	ArtistLogo APIImageSizes `json:"artist_logo,omitempty"`
-	Title      string        `json:"title"`
-	Year       int           `json:"year"`
-	Cover      APIImageSizes `json:"cover,omitempty"`
-	Images     []APIImage    `json:"images"`
+	ID         int              `json:"id"`
+	Artist     string           `json:"artist"`
+	ArtistID   int              `json:"artist_id"`
+	ArtistLogo track.ImageSizes `json:"artist_logo,omitempty"`
+	Title      string           `json:"title"`
+	Year       int              `json:"year"`
+	Cover      track.ImageSizes `json:"cover,omitempty"`
+	Images     []APIImage       `json:"images"`
 }
 
 type APIAlbumSingle struct {
@@ -174,7 +172,7 @@ type APIConvertTracks struct {
 	JobID int64 `json:"job_id"`
 }
 
-func (t *AlbumDB) ToAPI() APIAlbum {
+func AlbumToAPI(t *db.Album) APIAlbum {
 	return APIAlbum{
 		ID:       t.ID,
 		Artist:   t.Artist,
@@ -214,39 +212,4 @@ type APITrackConvertPost struct {
 type APITrackPlayPost struct {
 	UserID   string `json:"userId"` // WebSocket userId
 	TrackIDs []int  `json:"track_ids"`
-}
-
-func ThumbnailFilename(img *Image) string {
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(img.Path))
-
-	if img.DirectoryID == nil {
-		return fmt.Sprintf(
-			"embedded_%02d_%016x.jpg",
-			img.Type,
-			h.Sum64(),
-		)
-	}
-
-	return fmt.Sprintf(
-		"%d_%02d_%016x.jpg",
-		*img.DirectoryID,
-		img.Type,
-		h.Sum64(),
-	)
-}
-
-func ThumbnailURL(img *Image, size int) string {
-	return "/api/v1/images/" +
-		strconv.Itoa(size) + "/" +
-		ThumbnailFilename(img)
-}
-
-func ImageURLs(img *Image, tp ImageType) APIImageSizes {
-	sizes := ThumbnailSizesFor(tp)
-	result := make(APIImageSizes, len(sizes))
-	for _, size := range sizes {
-		result[size] = ThumbnailURL(img, size)
-	}
-	return result
 }

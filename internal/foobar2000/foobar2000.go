@@ -8,8 +8,7 @@ import (
 	"net/http"
 	"os/exec"
 	"sonary/internal/config"
-	"sonary/internal/database"
-	"sonary/internal/lib"
+	db "sonary/internal/database"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,7 +30,7 @@ func GetPlayer() *Player {
 	once.Do(func() {
 		instance = &Player{
 			cfg: config.GetConfig(),
-			db:  database.Reader(),
+			db:  db.Reader(),
 			client: &http.Client{
 				Timeout: 5 * time.Second,
 			},
@@ -62,16 +61,16 @@ func (p *Player) buildPlayItems(trackIDs []int) ([]PlayItem, error) {
 
 	for _, id := range trackIDs {
 
-		track, err := database.GetTrack(p.db, id)
+		t, err := db.GetTrack(p.db, id)
 		if err != nil {
 			log.Printf("Cannot load track %d: %v", id, err)
 			continue
 		}
 
 		item := PlayItem{
-			Path:        p.trackToPath(track),
-			IsCue:       track.IsCue,
-			TrackNumber: track.TrackNumber,
+			Path:        p.trackToPath(t),
+			IsCue:       t.IsCue,
+			TrackNumber: t.TrackNumber,
 		}
 
 		items = append(items, item)
@@ -84,10 +83,10 @@ func (p *Player) buildPlayItems(trackIDs []int) ([]PlayItem, error) {
 	return items, nil
 }
 
-func (p *Player) trackToPath(track *lib.TrackDB) string {
-	path := track.Path
-	if track.IsCue {
-		path = track.CueFile
+func (p *Player) trackToPath(t *db.Track) string {
+	path := t.Path
+	if t.IsCue {
+		path = t.CueFile
 	}
 	for _, mapping := range p.cfg.PathMap {
 		from := strings.TrimRight(mapping.From, "/\\")

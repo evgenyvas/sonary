@@ -4,14 +4,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"sonary/internal/ffmpeg"
-	"sonary/internal/lib"
+	db "sonary/internal/database"
 	"strings"
 
 	"github.com/dhowden/tag"
 )
 
-func scanAudioFile(ff *ffmpeg.FFmpeg, path string, fileName string) (*lib.Track, error) {
+func scanAudioFile(ad AudioDuration, path string, fileName string) (*db.Track, error) {
 	fullPath := filepath.Join(path, fileName)
 	f, err := os.Open(fullPath)
 	if err != nil {
@@ -19,7 +18,7 @@ func scanAudioFile(ff *ffmpeg.FFmpeg, path string, fileName string) (*lib.Track,
 	}
 	defer f.Close()
 
-	duration, err := ff.Duration(fullPath)
+	duration, err := ad.Duration(fullPath)
 	if err != nil {
 		return nil, err
 	}
@@ -31,7 +30,7 @@ func scanAudioFile(ff *ffmpeg.FFmpeg, path string, fileName string) (*lib.Track,
 	if err != nil {
 		if errors.Is(err, tag.ErrNoTagsFound) {
 			// tags not found
-			return &lib.Track{
+			return &db.Track{
 				Path:     filepath.Join(path, fileName),
 				FileType: strings.ToUpper(strings.ReplaceAll(ext, ".", "")),
 				Title:    fileTitle,
@@ -53,7 +52,7 @@ func scanAudioFile(ff *ffmpeg.FFmpeg, path string, fileName string) (*lib.Track,
 	if trackTitle == "" {
 		trackTitle = fileTitle
 	}
-	track := &lib.Track{
+	track := &db.Track{
 		Path:        filepath.Join(path, fileName),
 		FileType:    string(meta.FileType()),
 		Title:       trackTitle,

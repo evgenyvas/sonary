@@ -12,6 +12,6 @@ build:
 	@go build
 
 build-with-coverage:
-	@go build -cover -o notecata-coverage
+	@go build -cover -o sonary-coverage
 
 .DEFAULT_GOAL := build

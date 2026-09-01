@@ -8,8 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"sonary/internal/ffmpeg"
-	"sonary/internal/lib"
+	db "sonary/internal/database"
 	"strconv"
 	"strings"
 	"time"
@@ -35,10 +34,10 @@ type CueFile struct {
 	Ext         string
 	TotalFrames int
 
-	Tracks []Track
+	Tracks []CueTrack
 }
 
-type Track struct {
+type CueTrack struct {
 	Number int
 	Type   string
 
@@ -48,7 +47,7 @@ type Track struct {
 
 	REM REMTags
 
-	Indexes []Index
+	Indexes []CueIndex
 
 	StartFrame       int // INDEX 01
 	EndBoundaryFrame int // The point where this track is guaranteed to end
@@ -56,12 +55,12 @@ type Track struct {
 	HasPregap        bool
 }
 
-type Index struct {
+type CueIndex struct {
 	Number int
 	Frame  int
 }
 
-type fileInfo struct {
+type CueFileInfo struct {
 	Name string
 	Type string
 }
@@ -74,7 +73,7 @@ func ParseCue(r io.Reader) (*CueSheet, error) {
 	scanner := bufio.NewScanner(r)
 
 	var currentFile *CueFile
-	var currentTrack *Track
+	var currentTrack *CueTrack
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -138,7 +137,7 @@ func ParseCue(r io.Reader) (*CueSheet, error) {
 				continue
 			}
 			currentFile.Tracks =
-				append(currentFile.Tracks, Track{
+				append(currentFile.Tracks, CueTrack{
 					Number: num,
 					Type:   typ,
 				})
@@ -166,7 +165,7 @@ func ParseCue(r io.Reader) (*CueSheet, error) {
 				continue
 			}
 			currentTrack.Indexes =
-				append(currentTrack.Indexes, Index{
+				append(currentTrack.Indexes, CueIndex{
 					Number: num,
 					Frame:  frame,
 				})
@@ -231,14 +230,14 @@ func parseREM(line string) (string, string, bool) {
 		true
 }
 
-func parseFileLine(line string) *fileInfo {
+func parseFileLine(line string) *CueFileInfo {
 	line = strings.TrimSpace(line[5:]) // Remove prefix "FILE "
 
 	// Variant 1: filename inside quotes
 	if strings.HasPrefix(line, "\"") {
 		last := strings.LastIndex(line, "\"")
 		if last > 0 {
-			return &fileInfo{
+			return &CueFileInfo{
 				Name: line[1:last],
 				Type: strings.TrimSpace(line[last+1:]),
 			}
@@ -248,7 +247,7 @@ func parseFileLine(line string) *fileInfo {
 	// Variant 2: filename without quotes (split by last space)
 	parts := strings.Fields(line)
 	if len(parts) >= 2 {
-		return &fileInfo{
+		return &CueFileInfo{
 			Name: strings.Join(parts[:len(parts)-1], " "),
 			Type: parts[len(parts)-1],
 		}
@@ -343,7 +342,7 @@ func DecodeCue(data []byte) string {
 	return string(data)
 }
 
-func scanCue(ff *ffmpeg.FFmpeg, path string, cueFile string) ([]*lib.Track, error) {
+func scanCue(ad AudioDuration, path string, cueFile string) ([]*db.Track, error) {
 	log.Printf("Scanning CUE... '%s'\n", cueFile)
 	cueData, err := os.ReadFile(filepath.Join(path, cueFile))
 	if err != nil {
@@ -363,7 +362,7 @@ func scanCue(ff *ffmpeg.FFmpeg, path string, cueFile string) ([]*lib.Track, erro
 
 	for fi := range cue.Files {
 		file := &cue.Files[fi]
-		duration, err := ff.Duration(filepath.Join(
+		duration, err := ad.Duration(filepath.Join(
 			path, strings.ReplaceAll(file.Name, "\\", string(os.PathSeparator))))
 		if err != nil {
 			log.Printf("Load duration error: %v", err)
@@ -378,7 +377,8 @@ func scanCue(ff *ffmpeg.FFmpeg, path string, cueFile string) ([]*lib.Track, erro
 	if album == "" {
 		album = "Unknown Album"
 	}
-	tracks := []*lib.Track{}
+	// create track objects for insert into database
+	tracks := []*db.Track{}
 	for fi := range cue.Files {
 		file := &cue.Files[fi]
 		for ti := range file.Tracks {
@@ -387,7 +387,7 @@ func scanCue(ff *ffmpeg.FFmpeg, path string, cueFile string) ([]*lib.Track, erro
 			if track.HasPregap {
 				pregapDuration = FramesToDuration(track.StartFrame - track.EndBoundaryFrame)
 			}
-			tracks = append(tracks, &lib.Track{
+			tracks = append(tracks, &db.Track{
 				Path:           filepath.Join(path, strings.ReplaceAll(file.Name, "\\", string(os.PathSeparator))),
 				FileType:       strings.ToUpper(strings.ReplaceAll(file.Ext, ".", "")),
 				Title:          track.Title,

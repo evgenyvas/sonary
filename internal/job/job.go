@@ -12,9 +12,9 @@ import (
 	"os"
 	"runtime/debug"
 	"slices"
+	appContext "sonary/internal/context"
 	"sonary/internal/database"
 	"sonary/internal/ffmpeg"
-	"sonary/internal/lib"
 	"sonary/internal/track"
 	"sonary/internal/websocket"
 	"sonary/utils"
@@ -398,8 +398,8 @@ func processTask(db *sql.DB, job *Job, workerID int) (any, error) {
 			total++
 		}
 
-		lib.ResetImportContext()
-		ct := lib.GetImportContext()
+		appContext.ResetImportContext()
+		ct := appContext.GetImportContext()
 		ct.Progress.Total = total
 
 		return res, nil
@@ -418,7 +418,7 @@ func processTask(db *sql.DB, job *Job, workerID int) (any, error) {
 			return nil, ErrTaskWait
 		}
 
-		ct := lib.GetImportContext()
+		ct := appContext.GetImportContext()
 
 		var jobPayload JobPath
 		err = json.Unmarshal(job.Payload, &jobPayload)
@@ -437,13 +437,13 @@ func processTask(db *sql.DB, job *Job, workerID int) (any, error) {
 			if newPercent > oldPercent {
 				hub := websocket.GetHub()
 				hub.Send <- websocket.ProgressEvent{
-					Type:     lib.EventImportProgressUpdate,
+					Type:     appContext.EventImportProgressUpdate,
 					Progress: newPercent,
 				}
 			}
 		}()
 
-		err = track.ScanTracksInDir(jobPayload.Path)
+		err = track.ScanTracksInDir(jobPayload.Path, ffmpeg.NewFFmpeg())
 		if err != nil {
 			log.Printf("[Job %v] Scan directory tracks error: %v", job.ID, err)
 			return nil, err
@@ -481,8 +481,8 @@ func processTask(db *sql.DB, job *Job, workerID int) (any, error) {
 			}
 		}
 
-		lib.ResetConvertProgress()
-		ct := lib.GetConvertContext()
+		appContext.ResetConvertProgress()
+		ct := appContext.GetConvertContext()
 		ct.Progress.Total = total
 
 		return nil, ErrTaskWaitChildren
@@ -495,26 +495,26 @@ func processTask(db *sql.DB, job *Job, workerID int) (any, error) {
 		}
 
 		readDB := database.Reader()
-		track, err := database.GetTrack(readDB, jobPayload.TrackID)
+		t, err := database.GetTrack(readDB, jobPayload.TrackID)
 		if err != nil {
 			log.Printf("[Job %v] Load track error: %v", job.ID, err)
 			return nil, err
 		}
 
 		// check if audio file exists (cannot use Open, because ffmpeg can open too)
-		if _, err := os.Stat(track.Path); os.IsNotExist(err) {
+		if _, err := os.Stat(t.Path); os.IsNotExist(err) {
 			log.Printf("[Job %v] Source file not found: %v", job.ID, err)
 			return nil, err
 		}
 
-		ct := lib.GetConvertContext()
+		ct := appContext.GetConvertContext()
 
 		defer func() {
 			newProcessed := int(ct.Progress.Processed.Add(1))
 			hub := websocket.GetHub()
 			hub.Send <- websocket.ProgressConvertEvent{
 				BaseEvent: websocket.BaseEvent{UserID: jobPayload.UserID},
-				Type:      lib.EventConvertProgressUpdate,
+				Type:      appContext.EventConvertProgressUpdate,
 				Total:     ct.Progress.Total,
 				Processed: newProcessed,
 				Progress:  utils.GetPercent(newProcessed, ct.Progress.Total),
@@ -522,15 +522,15 @@ func processTask(db *sql.DB, job *Job, workerID int) (any, error) {
 		}()
 
 		var tmpPath string
-		if track.FileType == "MP3" && jobPayload.Format == "mp3" {
-			tmpFile, err := os.CreateTemp("", "track_"+strconv.Itoa(track.ID)+"_direct_*.mp3")
+		if t.FileType == "MP3" && jobPayload.Format == "mp3" {
+			tmpFile, err := os.CreateTemp("", "track_"+strconv.Itoa(t.ID)+"_direct_*.mp3")
 			if err != nil {
 				log.Printf("[Job %v] Failed to create temp file: %v", job.ID, err)
 				return nil, err
 			}
 			tmpPath = tmpFile.Name()
 
-			srcFile, err := os.Open(track.Path)
+			srcFile, err := os.Open(t.Path)
 			if err != nil {
 				tmpFile.Close()
 				os.Remove(tmpPath)
@@ -551,17 +551,17 @@ func processTask(db *sql.DB, job *Job, workerID int) (any, error) {
 			hub := websocket.GetHub()
 			hub.Send <- websocket.ProgressTrackConvertEvent{
 				BaseEvent:  websocket.BaseEvent{UserID: jobPayload.UserID},
-				Type:       lib.EventConvertTrackProgressUpdate,
+				Type:       appContext.EventConvertTrackProgressUpdate,
 				Progress:   100,
 				Status:     websocket.ConvertStatusCompleted,
-				TrackID:    track.ID,
-				TrackTitle: track.Title,
+				TrackID:    t.ID,
+				TrackTitle: t.Title,
 			}
 
 			log.Printf("[Job %v] Track is already MP3. Copied directly without FFmpeg.", job.ID)
 		} else {
 			ff := ffmpeg.NewFFmpeg()
-			tmpPath, err = ff.ConvertFile(track, lib.ConvertParams{
+			tmpPath, err = ff.ConvertFile(t, track.ConvertParams{
 				Format:        jobPayload.Format,
 				Mode:          jobPayload.Mode,
 				Quality:       jobPayload.Quality,
