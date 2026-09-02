@@ -1,0 +1,286 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Install &mdash; Sonary 0.0.1 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=f5127f15" />
+
+  
+      <script src="../_static/jquery.js?v=8dae8fb0"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=d45e8c67"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Tracks" href="tracks.html" />
+    <link rel="prev" title="Documentation" href="index.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            Sonary
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Documentation</a><ul class="current">
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Install</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#quick-start-with-podman-wsl2-linux">🚀 Quick Start with Podman (WSL2 / Linux)</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#prerequisites">1. Prerequisites</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#preparing-the-environment">2. Preparing the Environment</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#launching-the-application">3. Launching the Application</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#usage">4. Usage</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#useful-management-commands">🛠️ Useful Management Commands</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#mounted-volumes-structure">📂 Mounted Volumes Structure</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#native-linux-installation-without-containers">🐧 Native Linux Installation (Without Containers)</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#install-dependencies">1. Install Dependencies</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#configure-the-environment">2. Configure the Environment</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#build-and-compile">3. Build and Compile</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#start-the-server">4. Start the Server</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="tracks.html">Tracks</a></li>
+<li class="toctree-l2"><a class="reference internal" href="artists.html">Artists</a></li>
+<li class="toctree-l2"><a class="reference internal" href="albums.html">Albums</a></li>
+<li class="toctree-l2"><a class="reference internal" href="play.html">Play</a></li>
+<li class="toctree-l2"><a class="reference internal" href="convert.html">Convert</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">Sonary</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="index.html">Documentation</a></li>
+      <li class="breadcrumb-item active">Install</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../_sources/usage/install.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="install">
+<span id="index-0"></span><h1>Install<a class="headerlink" href="#install" title="Link to this heading"></a></h1>
+<p>Sonary is an audio server, which scans your library and allows to view collection, listen it via external local player and convert to mp3.</p>
+<section id="quick-start-with-podman-wsl2-linux">
+<h2>🚀 Quick Start with Podman (WSL2 / Linux)<a class="headerlink" href="#quick-start-with-podman-wsl2-linux" title="Link to this heading"></a></h2>
+<p>If you run the application inside a container, you don’t need to install any dependencies locally-only Podman is required.</p>
+<section id="prerequisites">
+<h3>1. Prerequisites<a class="headerlink" href="#prerequisites" title="Link to this heading"></a></h3>
+<p>Make sure you have the following installed on your machine:</p>
+<ul class="simple">
+<li><p>Podman (version 4.0+)</p></li>
+<li><p>podman-compose</p></li>
+</ul>
+<p>Recommended Podman configuration (Rootless mode):</p>
+<p>~/.config/containers/containers.conf</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="p">[</span><span class="n">containers</span><span class="p">]</span>
+<span class="n">dns_servers</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;8.8.8.8&quot;</span><span class="p">,</span> <span class="s2">&quot;8.8.4.4&quot;</span><span class="p">]</span>
+<span class="p">[</span><span class="n">network</span><span class="p">]</span>
+<span class="n">pasta_options</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;--map-host-loopback=169.254.1.2&quot;</span><span class="p">]</span>
+</pre></div>
+</div>
+</section>
+<section id="preparing-the-environment">
+<h3>2. Preparing the Environment<a class="headerlink" href="#preparing-the-environment" title="Link to this heading"></a></h3>
+<p>Before starting the container, ensure your database directory is ready and your configuration files are set up:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>Create a directory to persist your SQLite database inside your Linux environment:</p></li>
+</ol>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">mkdir</span> <span class="o">-</span><span class="n">p</span> <span class="o">~/</span><span class="n">dev</span><span class="o">/</span><span class="n">data</span><span class="o">/</span><span class="n">sqlite</span>
+</pre></div>
+</div>
+<ol class="arabic simple" start="2">
+<li><p>Verify that a production .env file is present in the project root with the correct settings</p></li>
+</ol>
+</div></blockquote>
+</section>
+<section id="launching-the-application">
+<h3>3. Launching the Application<a class="headerlink" href="#launching-the-application" title="Link to this heading"></a></h3>
+<p>Network routing, FFmpeg integration, and music directory mounting are handled automatically.</p>
+<section id="option-a-using-podman-compose-recommended">
+<h4>Option A: Using podman-compose (Recommended)<a class="headerlink" href="#option-a-using-podman-compose-recommended" title="Link to this heading"></a></h4>
+<p>Run the following in the project root:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">podman</span><span class="o">-</span><span class="n">compose</span> <span class="o">--</span><span class="n">podman</span><span class="o">-</span><span class="n">build</span><span class="o">-</span><span class="n">args</span><span class="o">=</span><span class="s2">&quot;--network=host&quot;</span> <span class="n">build</span>
+<span class="n">podman</span><span class="o">-</span><span class="n">compose</span> <span class="n">up</span> <span class="o">-</span><span class="n">d</span>
+</pre></div>
+</div>
+<p>On the first run, <cite>podman-compose will</cite> automatically download base layers, compile frontend assets via Vite, build the static Go binary, install FFmpeg, and launch the server in the background.</p>
+</section>
+<section id="option-b-using-pure-podman-cli">
+<h4>Option B: Using pure Podman CLI<a class="headerlink" href="#option-b-using-pure-podman-cli" title="Link to this heading"></a></h4>
+<p>If you prefer not to use <cite>podman-compose</cite>, build and run the container manually:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">podman</span> <span class="n">build</span> <span class="o">--</span><span class="n">network</span><span class="o">=</span><span class="n">host</span> <span class="o">-</span><span class="n">t</span> <span class="n">sonary</span><span class="o">-</span><span class="n">prod</span><span class="p">:</span><span class="n">latest</span> <span class="o">-</span><span class="n">f</span> <span class="n">Containerfile</span> <span class="o">.</span>
+<span class="n">podman</span> <span class="n">run</span> <span class="o">-</span><span class="n">d</span> \
+  <span class="o">--</span><span class="n">name</span> <span class="n">sonary</span><span class="o">-</span><span class="n">app</span> \
+  <span class="o">--</span><span class="n">restart</span> <span class="n">unless</span><span class="o">-</span><span class="n">stopped</span> \
+  <span class="o">-</span><span class="n">p</span> <span class="mi">3101</span><span class="p">:</span><span class="mi">3101</span> \
+  <span class="o">-</span><span class="n">v</span> <span class="o">~/</span><span class="n">dev</span><span class="o">/</span><span class="n">data</span><span class="o">/</span><span class="n">sqlite</span><span class="p">:</span><span class="o">/</span><span class="n">data</span><span class="o">/</span><span class="n">sqlite</span><span class="p">:</span><span class="n">rw</span><span class="p">,</span><span class="n">U</span> \
+  <span class="o">-</span><span class="n">v</span> <span class="o">./</span><span class="n">var</span><span class="p">:</span><span class="o">/</span><span class="n">app</span><span class="o">/</span><span class="n">var</span><span class="p">:</span><span class="n">rw</span><span class="p">,</span><span class="n">U</span> \
+  <span class="o">-</span><span class="n">v</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">d</span><span class="o">/</span><span class="n">Music</span><span class="o">/</span><span class="n">_audio</span><span class="p">:</span><span class="o">/</span><span class="n">data</span><span class="o">/</span><span class="n">music_d</span><span class="p">:</span><span class="n">ro</span> \
+  <span class="o">-</span><span class="n">v</span> <span class="o">/</span><span class="n">mnt</span><span class="o">/</span><span class="n">c</span><span class="o">/</span><span class="n">Music</span><span class="o">/</span><span class="n">_audio</span><span class="p">:</span><span class="o">/</span><span class="n">data</span><span class="o">/</span><span class="n">music_c</span><span class="p">:</span><span class="n">ro</span> \
+  <span class="n">sonary</span><span class="o">-</span><span class="n">prod</span><span class="p">:</span><span class="n">latest</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="usage">
+<h3>4. Usage<a class="headerlink" href="#usage" title="Link to this heading"></a></h3>
+<p>Once the container is up and running, open your browser and navigate to:
+👉 <a class="reference external" href="http://localhost:3101">http://localhost:3101</a></p>
+</section>
+</section>
+<hr class="docutils" />
+<section id="useful-management-commands">
+<h2>🛠️ Useful Management Commands<a class="headerlink" href="#useful-management-commands" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p>View runtime logs (real-time):</p></li>
+</ul>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">podman</span><span class="o">-</span><span class="n">compose</span> <span class="n">logs</span> <span class="o">-</span><span class="n">f</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p>Stop the server:</p></li>
+</ul>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">podman</span><span class="o">-</span><span class="n">compose</span> <span class="n">down</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p>Force rebuild (after making code changes to backend or frontend):</p></li>
+</ul>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">podman</span><span class="o">-</span><span class="n">compose</span> <span class="n">up</span> <span class="o">-</span><span class="n">d</span> <span class="o">--</span><span class="n">build</span>
+</pre></div>
+</div>
+</section>
+<section id="mounted-volumes-structure">
+<h2>📂 Mounted Volumes Structure<a class="headerlink" href="#mounted-volumes-structure" title="Link to this heading"></a></h2>
+<p>The container interacts with the host machine using the following volumes defined in <cite>compose.yml</cite>:</p>
+<ul class="simple">
+<li><p>~/dev/data/sqlite - Persistent storage for the SQLite database (write access).</p></li>
+<li><p>./var - Local thumbnail and album art cache (automatically generated inside the project folder).</p></li>
+<li><p>/mnt/c/Music/_audio and /mnt/d/Music/_audio - Your music collections (mounted in Read-Only mode to ensure the safety of your personal files).</p></li>
+</ul>
+</section>
+<section id="native-linux-installation-without-containers">
+<h2>🐧 Native Linux Installation (Without Containers)<a class="headerlink" href="#native-linux-installation-without-containers" title="Link to this heading"></a></h2>
+<section id="install-dependencies">
+<h3>1. Install Dependencies<a class="headerlink" href="#install-dependencies" title="Link to this heading"></a></h3>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">apt</span> <span class="n">update</span>
+<span class="n">apt</span> <span class="n">install</span> <span class="n">ffmpeg</span>
+</pre></div>
+</div>
+</section>
+<section id="configure-the-environment">
+<h3>2. Configure the Environment<a class="headerlink" href="#configure-the-environment" title="Link to this heading"></a></h3>
+<p>Create a configuration file named <cite>.env.local</cite> in the project root. If <cite>.env.local</cite> is not present, default parameters from <cite>.env</cite> will be used. All parameters defined in <cite>.env.local</cite> take priority over other configuration files.</p>
+<p>Parameters to configure:</p>
+<ul class="simple">
+<li><p>APP_ENV - Specifies environment-specific config files, either <cite>dev</cite> or <cite>prod</cite></p></li>
+<li><p>HOST — Specifies the address and port the server will bind to (e.g., :8080)</p></li>
+<li><p>SERVE_FRONTEND - Allows to serve frontend via standart template (templates/index.html). If disabled, only /api and /ws endpoints will be available</p></li>
+<li><p>ROOT_PATHS — Paths to the directories where your music is stored</p></li>
+<li><p>PATH_MAP - Path transformation rules, which used for play via foobar2000</p></li>
+<li><p>DATABASE_DSN - Path to SQLite database</p></li>
+<li><p>WORKER_COUNT - Number of maximum parallel running jobs</p></li>
+<li><p>FOOBAR_PATH - Path to foobar2000 executable</p></li>
+<li><p>FOOBAR_API - Use beefweb plugin for API requests. If disabled, foobar2000 CLI will be used</p></li>
+<li><p>FOOBAR_API_URL - Address for beefweb API requests</p></li>
+<li><p>CACHE_DIR - Path for image thumbnails</p></li>
+</ul>
+</section>
+<section id="build-and-compile">
+<h3>3. Build and Compile<a class="headerlink" href="#build-and-compile" title="Link to this heading"></a></h3>
+<p>Download Go modules and build the backend binary:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">go</span> <span class="n">mod</span> <span class="n">download</span>
+<span class="n">make</span> <span class="n">build</span>
+</pre></div>
+</div>
+<p>Build the frontend UI:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">cd</span> <span class="o">./</span><span class="n">frontend</span>
+<span class="n">yarn</span> <span class="n">install</span>
+<span class="n">yarn</span> <span class="n">build</span>
+</pre></div>
+</div>
+</section>
+<section id="start-the-server">
+<h3>4. Start the Server<a class="headerlink" href="#start-the-server" title="Link to this heading"></a></h3>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">./</span><span class="n">sonary</span>
+</pre></div>
+</div>
+<p>If the <cite>HOST</cite> parameter in your config file equals <cite>:8080</cite>, the web interface will be available at <cite>http://localhost:8080</cite>.</p>
+<p>You can also set this up as a permanent system service using the example provided in <cite>support/systemd/sonary.service</cite>.</p>
+</section>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="index.html" class="btn btn-neutral float-left" title="Documentation" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="tracks.html" class="btn btn-neutral float-right" title="Tracks" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, evgenyvas.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
