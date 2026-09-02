@@ -1,7 +1,7 @@
 Sonary
 ======
 
-![Sonary logo](https://evgenyvas.github.io/logo_full_min.png)
+![Sonary logo](https://evgenyvas.github.io/sonary/logo_full_min.png)
 
 🎵 Sonary Audio Server
 
