@@ -1,9 +1,13 @@
 Sonary
 ======
 
+![Sonary logo](https://evgenyvas.github.io/logo_full_min.png)
+
 🎵 Sonary Audio Server
 
 Sonary is a fast and lightweight audio streaming server built with Go. The application automatically indexes your music directories and provides a clean web interface for seamless playback.
+
+[Documentation](https://evgenyvas.github.io/sonary)
 
 ## 🚀 Quick Start with Podman (WSL2 / Linux)
 
